@@ -1,0 +1,14 @@
+name: vault-service
+
+services:
+  app:
+    build: .
+    container_name: vault-service
+    ports:
+      - "7493:8080"
+    restart: unless-stopped
+
+networks:
+  default:
+    name: trustylynx-net
+    external: true
