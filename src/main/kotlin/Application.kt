@@ -3,7 +3,9 @@ package de.trustylynx
 import de.trustylynx.api.vaultRoutes
 import de.trustylynx.common.configureSerialization
 import de.trustylynx.common.configureStatusPages
+import de.trustylynx.common.createDataSource
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationStopped
 import io.ktor.server.netty.EngineMain
 import io.ktor.server.routing.routing
 
@@ -13,7 +15,14 @@ fun main(args: Array<String>) {
 
 /** Einziger Ort, an dem Abhängigkeiten gebaut und verdrahtet werden. */
 fun Application.module() {
-    // TODO: AppConfig, DataSource, Clients und VaultService hier bauen, sobald es sie gibt.
+    val config = AppConfig.fromEnv()
+
+    val dataSource = createDataSource(config.db)
+    monitor.subscribe(ApplicationStopped) {
+        dataSource.close()
+    }
+
+    // TODO: Repository, Clients und VaultService aus dataSource bauen und an configureApp übergeben.
     configureApp()
 }
 
