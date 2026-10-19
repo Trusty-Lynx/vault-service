@@ -30,4 +30,5 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation(ktorLibs.server.testHost)
+    testImplementation(ktorLibs.client.mock)
 }
