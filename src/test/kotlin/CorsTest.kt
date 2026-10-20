@@ -6,6 +6,7 @@ import de.trustylynx.clients.KeyServiceClient
 import de.trustylynx.common.Caller
 import de.trustylynx.common.CorsConfig
 import de.trustylynx.domain.Vault
+import de.trustylynx.domain.ItemService
 import de.trustylynx.domain.VaultService
 import de.trustylynx.domain.VaultSession
 import de.trustylynx.persistence.VaultRepository
@@ -138,7 +139,7 @@ class CorsTest {
 
     private fun corsTest(cors: CorsConfig = CorsConfig(), block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApp(VaultService(UnusedRepository, UnusedKeyService, UnusedCryptoService), cors) }
+        application { configureApp(VaultService(UnusedRepository, UnusedKeyService, UnusedCryptoService), ItemService(FakeItemRepository(), UnusedCryptoService), cors) }
         block()
     }
 
