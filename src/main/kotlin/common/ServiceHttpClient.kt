@@ -13,6 +13,7 @@ import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CancellationException
 import java.io.IOException
+import java.nio.channels.UnresolvedAddressException
 
 /** Header, an dem andere Services den Vault-Service erkennen. */
 const val SERVICE_TOKEN_HEADER = "X-Service-Token"
@@ -34,11 +35,14 @@ fun serviceUrl(baseUrl: String, vararg segments: String): Url =
 /**
  * Führt den Aufruf an einen anderen Service aus. Netzwerkfehler (Verbindung abgelehnt, Timeout) → [UpstreamException],
  * damit daraus 502 wird und nicht 500. Timeouts von HttpTimeout sind ebenfalls IOExceptions.
+ * Hostname nicht auflösbar ist dagegen KEINE IOException (UnresolvedAddressException), deshalb extra.
  */
 suspend inline fun <T> callUpstream(what: String, block: () -> T): T = try {
     block()
 } catch (e: IOException) {
-    throw UpstreamException("$what unreachable", e)
+    throw UpstreamException("$what unreachable: ${e.message}", e)
+} catch (e: UnresolvedAddressException) {
+    throw UpstreamException("$what unreachable: hostname cannot be resolved (check the service URL)", e)
 }
 
 /** Liest den Body als [T]. Fehlerstatus oder unlesbarer Body → [UpstreamException]. */
