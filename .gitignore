@@ -1,0 +1,27 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Kotlin
+.kotlin/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Lokale Secrets (z.B. Pepper, DB-Passwörter)
+.env
+*.env.local
+.env.bak
+
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

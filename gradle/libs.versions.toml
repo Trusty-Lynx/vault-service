@@ -1,9 +1,15 @@
 [versions]
 kotlin = "2.4.0"
 logback = "1.5.37"
+hikaricp = "7.1.0"
+bouncycastle = "1.86"
+postgresql = "42.7.13"
 
 [libraries]
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+hikaricp = { module = "com.zaxxer:HikariCP", version.ref = "hikaricp" }
+bouncycastle-prov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
