@@ -6,6 +6,7 @@ import de.trustylynx.clients.KeyServiceClient
 import de.trustylynx.common.AlreadyExists
 import de.trustylynx.common.DEVICE_ID_HEADER
 import de.trustylynx.common.IntegrityError
+import de.trustylynx.common.NO_DEVICE_ID
 import de.trustylynx.common.SESSION_ID_HEADER
 import de.trustylynx.common.USER_ID_HEADER
 import de.trustylynx.common.UpstreamException
@@ -111,6 +112,32 @@ class VaultRoutesTest {
     @Test
     fun `POST vault ohne Caller-Header ergibt 401`() = vaultTest {
         val response = client.post("/vault") {
+            contentType(ContentType.Application.Json)
+            setBody(VALID_BODY)
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+    }
+
+    @Test
+    fun `POST vault ohne X-Device-Id nimmt vorerst den Platzhalter`() = vaultTest {
+        val response = client.post("/vault") {
+            header(USER_ID_HEADER, "u42")
+            header(SESSION_ID_HEADER, "s-1")
+            contentType(ContentType.Application.Json)
+            setBody(VALID_BODY)
+        }
+
+        assertEquals(HttpStatusCode.Created, response.status)
+        assertEquals(NO_DEVICE_ID, repository.sessions.single().deviceId)
+    }
+
+    @Test
+    fun `POST vault mit ungueltiger X-Device-Id ergibt 401`() = vaultTest {
+        val response = client.post("/vault") {
+            header(USER_ID_HEADER, "u42")
+            header(DEVICE_ID_HEADER, "kaputt|id")
+            header(SESSION_ID_HEADER, "s-1")
             contentType(ContentType.Application.Json)
             setBody(VALID_BODY)
         }
