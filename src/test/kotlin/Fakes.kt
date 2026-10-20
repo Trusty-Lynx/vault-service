@@ -7,6 +7,7 @@ import de.trustylynx.common.AlreadyExists
 import de.trustylynx.common.Caller
 import de.trustylynx.common.IntegrityError
 import de.trustylynx.common.UpstreamException
+import de.trustylynx.domain.StoredHead
 import de.trustylynx.domain.StoredItem
 import de.trustylynx.domain.Vault
 import de.trustylynx.domain.VaultSession
@@ -78,6 +79,9 @@ internal class FakeItemRepository : ItemRepository {
         items[userId to item.itemId] = item
         return true
     }
+
+    override suspend fun listHeads(userId: String): List<StoredHead> =
+        items.filterKeys { it.first == userId }.values.sortedBy { it.itemId }.map { StoredHead(it.itemId, it.rev, it.headC2) }
 
     private fun StoredItem.copyWithRev(rev: Int) = StoredItem(itemId, rev, headC2, secretC2)
 }

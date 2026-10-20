@@ -12,6 +12,7 @@ import de.trustylynx.domain.VaultService
 import de.trustylynx.domain.VaultSession
 import de.trustylynx.security.VaultToken
 import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
@@ -25,6 +26,7 @@ import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.time.Clock
@@ -168,7 +170,75 @@ class ItemRoutesTest {
         assertTrue(itemRepository.items.isEmpty())
     }
 
+    // ---------- GET /items ----------
+
+    @Test
+    fun `neuer Tresor liefert leere Liste`() = itemTest {
+        val response = getItems()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals("""{"items":[]}""", response.bodyAsText())
+        assertTrue(cryptoService.calls.isEmpty())
+    }
+
+    @Test
+    fun `liefert nur die eigenen Koepfe als C1, ohne Passwoerter`() = itemTest {
+        val headB = byteArrayOf(0x01, 0x01) + ByteArray(156) { 8 }
+        itemRepository.items["u42" to "b"] = StoredItem("b", 2, FakeCryptoService.c2Of(headB), byteArrayOf(9))
+        itemRepository.items["u42" to "a"] = StoredItem("a", 1, FakeCryptoService.c2Of(HEAD), byteArrayOf(9))
+        itemRepository.items["u43" to "c"] = StoredItem("c", 1, FakeCryptoService.c2Of(HEAD), byteArrayOf(9))
+
+        val response = getItems()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val list = Json.parseToJsonElement(response.bodyAsText()).jsonObject.getValue("items").jsonArray.map { it.jsonObject }
+        assertEquals(listOf("a", "b"), list.map { it.getValue("id").jsonPrimitive.content })
+        assertEquals(listOf(1, 2), list.map { it.getValue("rev").jsonPrimitive.int })
+        assertEquals(listOf(b64(HEAD), b64(headB)), list.map { it.getValue("head").jsonPrimitive.content })
+        assertTrue(list.all { "secret" !in it })
+        // Nur Teil h, je mit itemId. Nie s.
+        assertEquals(
+            setOf<Triple<String, CryptoPart, String?>>(Triple("u42", CryptoPart.HEAD, "a"), Triple("u42", CryptoPart.HEAD, "b")),
+            cryptoService.calls.toSet(),
+        )
+    }
+
+    @Test
+    fun `GET items ohne Tresor-Token ergibt 401 vault_locked`() = itemTest {
+        itemRepository.items["u42" to "a"] = StoredItem("a", 1, FakeCryptoService.c2Of(HEAD), byteArrayOf(9))
+
+        val response = client.get("/items") { callerHeaders() }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertTrue(response.bodyAsText().contains("vault_locked"))
+        assertTrue(cryptoService.calls.isEmpty())
+    }
+
+    @Test
+    fun `manipulierter Kopf ergibt 500 integrity_error`() = itemTest {
+        itemRepository.items["u42" to "a"] = StoredItem("a", 1, FakeCryptoService.c2Of(HEAD), byteArrayOf(9))
+        cryptoService.integrityError = true
+
+        val response = getItems()
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status)
+        assertTrue(response.bodyAsText().contains("integrity_error"))
+    }
+
+    @Test
+    fun `GET items mit nicht erreichbarem Crypto-Service ergibt 502`() = itemTest {
+        itemRepository.items["u42" to "a"] = StoredItem("a", 1, FakeCryptoService.c2Of(HEAD), byteArrayOf(9))
+        cryptoService.fail = true
+
+        assertEquals(HttpStatusCode.BadGateway, getItems().status)
+    }
+
     // ---------- Hilfen ----------
+
+    private suspend fun ApplicationTestBuilder.getItems(): HttpResponse = client.get("/items") {
+        callerHeaders()
+        header(VAULT_TOKEN_HEADER, token)
+    }
 
     private fun itemTest(block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
         environment { config = MapApplicationConfig() }

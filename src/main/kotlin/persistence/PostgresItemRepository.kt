@@ -1,6 +1,7 @@
 package de.trustylynx.persistence
 
 import de.trustylynx.common.withConnection
+import de.trustylynx.domain.StoredHead
 import de.trustylynx.domain.StoredItem
 import javax.sql.DataSource
 
@@ -47,6 +48,18 @@ class PostgresItemRepository(private val dataSource: DataSource) : ItemRepositor
             statement.setString(5, item.itemId)
             statement.setInt(6, previousRev)
             statement.executeUpdate() == 1
+        }
+    }
+
+    // secret_c2 wird hier absichtlich nicht gelesen: Passwörter gibt es nur einzeln über GET /items/secret.
+    override suspend fun listHeads(userId: String): List<StoredHead> = dataSource.withConnection { connection ->
+        connection.prepareStatement("SELECT item_id, rev, head_c2 FROM items WHERE user_id = ? ORDER BY item_id").use { statement ->
+            statement.setString(1, userId)
+            statement.executeQuery().use { row ->
+                buildList {
+                    while (row.next()) add(StoredHead(row.getString("item_id"), row.getInt("rev"), row.getBytes("head_c2")))
+                }
+            }
         }
     }
 }
