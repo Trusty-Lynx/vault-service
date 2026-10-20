@@ -3,6 +3,7 @@ package de.trustylynx.domain
 import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.CryptoServiceClient
 import de.trustylynx.common.Caller
+import de.trustylynx.common.NotFound
 import de.trustylynx.common.RevConflict
 import de.trustylynx.persistence.ItemRepository
 import kotlinx.coroutines.async
@@ -67,6 +68,19 @@ class ItemService(
                 }
             }.awaitAll()
         }
+    }
+
+    /**
+     * GET /items/secret (D6–D12): das Geheimnis (Passwort) EINES Eintrags als C1, mit rev für die AAD.
+     * Gibt es den Eintrag nicht (oder gehört er jemand anderem) → [NotFound].
+     *
+     * Guard und Ticket sind gestrichen (D3–D5 entfallen). ACHTUNG: Der ChaCha-Service verlangt für Teil s
+     * noch ein Guard-Ticket und antwortet sonst 403 → bei uns 502, bis die Prüfung dort entfernt ist.
+     */
+    suspend fun secret(caller: Caller, itemId: String): ItemSecret {
+        val stored = repository.findSecret(caller.userId, itemId) ?: throw NotFound()
+        val secret = cryptoService.decrypt(caller.userId, CryptoPart.SECRET, stored.secretC2, itemId)
+        return ItemSecret(rev = stored.rev, secret = secret)
     }
 
     private companion object {

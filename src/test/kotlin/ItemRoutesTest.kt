@@ -233,7 +233,77 @@ class ItemRoutesTest {
         assertEquals(HttpStatusCode.BadGateway, getItems().status)
     }
 
+    // ---------- GET /items/secret ----------
+
+    @Test
+    fun `liefert das Geheimnis als C1 mit rev`() = itemTest {
+        itemRepository.items["u42" to ITEM_ID] = StoredItem(ITEM_ID, 4, byteArrayOf(9), FakeCryptoService.c2Of(SECRET))
+
+        val response = getSecret()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(b64(SECRET), response.json("data"))
+        assertEquals(4, response.rev())
+        assertEquals(listOf<Triple<String, CryptoPart, String?>>(Triple("u42", CryptoPart.SECRET, ITEM_ID)), cryptoService.calls)
+    }
+
+    @Test
+    fun `unbekannter oder fremder Eintrag ergibt 404 ohne Crypto-Service`() = itemTest {
+        itemRepository.items["u43" to ITEM_ID] = StoredItem(ITEM_ID, 1, byteArrayOf(9), FakeCryptoService.c2Of(SECRET))
+
+        val response = getSecret()
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        assertTrue(cryptoService.calls.isEmpty())
+    }
+
+    @Test
+    fun `GET secret ohne Tresor-Token ergibt 401 vault_locked`() = itemTest {
+        itemRepository.items["u42" to ITEM_ID] = StoredItem(ITEM_ID, 1, byteArrayOf(9), FakeCryptoService.c2Of(SECRET))
+
+        val response = client.get("/items/secret") {
+            callerHeaders()
+            header(ITEM_ID_HEADER, ITEM_ID)
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertTrue(response.bodyAsText().contains("vault_locked"))
+        assertTrue(cryptoService.calls.isEmpty())
+    }
+
+    @Test
+    fun `GET secret ohne oder mit ungueltiger X-Item-Id ergibt 400`() = itemTest {
+        assertEquals(HttpStatusCode.BadRequest, getSecret(itemId = null).status)
+        assertEquals(HttpStatusCode.BadRequest, getSecret(itemId = "a|b").status)
+    }
+
+    @Test
+    fun `manipuliertes Geheimnis ergibt 500 integrity_error`() = itemTest {
+        itemRepository.items["u42" to ITEM_ID] = StoredItem(ITEM_ID, 1, byteArrayOf(9), FakeCryptoService.c2Of(SECRET))
+        cryptoService.integrityError = true
+
+        val response = getSecret()
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status)
+        assertTrue(response.bodyAsText().contains("integrity_error"))
+    }
+
+    @Test
+    fun `Crypto-Service lehnt ab oder ist nicht erreichbar ergibt 502`() = itemTest {
+        // So sieht es auch aus, solange der ChaCha-Service für Teil s noch ein Guard-Ticket verlangt (403 → 502).
+        itemRepository.items["u42" to ITEM_ID] = StoredItem(ITEM_ID, 1, byteArrayOf(9), FakeCryptoService.c2Of(SECRET))
+        cryptoService.fail = true
+
+        assertEquals(HttpStatusCode.BadGateway, getSecret().status)
+    }
+
     // ---------- Hilfen ----------
+
+    private suspend fun ApplicationTestBuilder.getSecret(itemId: String? = ITEM_ID): HttpResponse = client.get("/items/secret") {
+        callerHeaders()
+        header(VAULT_TOKEN_HEADER, token)
+        if (itemId != null) header(ITEM_ID_HEADER, itemId)
+    }
 
     private suspend fun ApplicationTestBuilder.getItems(): HttpResponse = client.get("/items") {
         callerHeaders()

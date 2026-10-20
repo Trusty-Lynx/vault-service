@@ -2,6 +2,7 @@ package de.trustylynx.persistence
 
 import de.trustylynx.domain.StoredHead
 import de.trustylynx.domain.StoredItem
+import de.trustylynx.domain.StoredSecret
 
 interface ItemRepository {
     /** Aktuelle Revision des Eintrags, oder null, wenn es ihn nicht gibt. */
@@ -18,4 +19,7 @@ interface ItemRepository {
 
     /** Köpfe aller Einträge des Nutzers (ohne Geheimnisse), sortiert nach itemId. Neuer Tresor → leere Liste. */
     suspend fun listHeads(userId: String): List<StoredHead>
+
+    /** Geheimnis und Revision eines Eintrags, oder null, wenn es ihn (für diesen Nutzer) nicht gibt. */
+    suspend fun findSecret(userId: String, itemId: String): StoredSecret?
 }

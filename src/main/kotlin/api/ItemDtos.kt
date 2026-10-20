@@ -28,3 +28,10 @@ data class ItemHeadResponse(
     val rev: Int,
     val head: String,
 )
+
+/** GET /items/secret. `data` ist C1, der Client öffnet es mit aad1 = TL-L1|{userId}|{itemId}|s|{rev}. */
+@Serializable
+data class ItemSecretResponse(
+    val data: String,
+    val rev: Int,
+)
