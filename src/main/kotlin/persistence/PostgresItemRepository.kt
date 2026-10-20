@@ -3,6 +3,7 @@ package de.trustylynx.persistence
 import de.trustylynx.common.withConnection
 import de.trustylynx.domain.StoredHead
 import de.trustylynx.domain.StoredItem
+import de.trustylynx.domain.StoredSecret
 import javax.sql.DataSource
 
 class PostgresItemRepository(private val dataSource: DataSource) : ItemRepository {
@@ -59,6 +60,16 @@ class PostgresItemRepository(private val dataSource: DataSource) : ItemRepositor
                 buildList {
                     while (row.next()) add(StoredHead(row.getString("item_id"), row.getInt("rev"), row.getBytes("head_c2")))
                 }
+            }
+        }
+    }
+
+    override suspend fun findSecret(userId: String, itemId: String): StoredSecret? = dataSource.withConnection { connection ->
+        connection.prepareStatement("SELECT rev, secret_c2 FROM items WHERE user_id = ? AND item_id = ?").use { statement ->
+            statement.setString(1, userId)
+            statement.setString(2, itemId)
+            statement.executeQuery().use { row ->
+                if (row.next()) StoredSecret(row.getInt("rev"), row.getBytes("secret_c2")) else null
             }
         }
     }

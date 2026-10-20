@@ -37,3 +37,19 @@ class ItemHead(
 ) {
     override fun toString(): String = "ItemHead(itemId=$itemId, rev=$rev)"
 }
+
+/** Geheimnis eines Eintrags aus `items`, noch mit Schicht 2 (für GET /items/secret). */
+class StoredSecret(
+    val rev: Int,
+    val secretC2: ByteArray,
+) {
+    override fun toString(): String = "StoredSecret(rev=$rev)"
+}
+
+/** Geheimnis ohne Schicht 2, also C1. Öffnen kann es nur der Client mit dem DEK. */
+class ItemSecret(
+    val rev: Int,
+    val secret: ByteArray,
+) {
+    override fun toString(): String = "ItemSecret(rev=$rev)"
+}
