@@ -17,6 +17,7 @@ import de.trustylynx.domain.VaultSession
 import de.trustylynx.persistence.VaultRepository
 import de.trustylynx.security.VaultToken
 import de.trustylynx.security.VerifierHasher
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -161,6 +162,54 @@ class VaultRoutesTest {
         assertNull(repository.vault)
     }
 
+    // ---------- GET /vault/params ----------
+
+    @Test
+    fun `params liefert Salt und KDF ohne Seiteneffekt`() = vaultTest {
+        repository.vault = storedVault()
+
+        val response = getParams()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(
+            Json.parseToJsonElement(
+                """{"salt":"${b64(SALT_VAULT)}","kdf":{"alg":"argon2id","m":65536,"t":3,"p":1,"len":32}}""",
+            ),
+            response.json(),
+        )
+        // Kein Tresor-Token, keine anderen Services
+        assertTrue(repository.sessions.isEmpty())
+        assertNull(keyService.calledWith)
+        assertNull(cryptoService.calledWith)
+    }
+
+    @Test
+    fun `params ohne Tresor ergibt 404`() = vaultTest {
+        val response = getParams()
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        assertTrue(response.bodyAsText().contains("not_found"))
+    }
+
+    @Test
+    fun `params liefert nicht den Tresor eines anderen Nutzers`() = vaultTest {
+        repository.vault = storedVault()
+
+        val response = client.get("/vault/params") {
+            header(USER_ID_HEADER, "u43")
+            header(SESSION_ID_HEADER, "s-2")
+        }
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+    }
+
+    @Test
+    fun `params ohne Caller-Header ergibt 401`() = vaultTest {
+        repository.vault = storedVault()
+
+        assertEquals(HttpStatusCode.Unauthorized, client.get("/vault/params").status)
+    }
+
     // ---------- POST /vault/unlock ----------
 
     @Test
@@ -259,6 +308,10 @@ class VaultRoutesTest {
         callerHeaders()
         contentType(ContentType.Application.Json)
         setBody(body)
+    }
+
+    private suspend fun ApplicationTestBuilder.getParams(): HttpResponse = client.get("/vault/params") {
+        callerHeaders()
     }
 
     private suspend fun ApplicationTestBuilder.postUnlock(unlockKey: ByteArray): HttpResponse = client.post("/vault/unlock") {

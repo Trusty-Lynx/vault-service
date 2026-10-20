@@ -8,10 +8,17 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 
-// TODO: GET /vault/params, POST /vault/lock implementieren.
+// TODO: POST /vault/lock implementieren.
 fun Route.vaultRoutes(vaultService: VaultService) {
+    // Nur Login-Token (bzw. vorerst Caller-Header), kein Tresor-Token: den gibt es erst nach dem Entsperren.
+    get("/vault/params") {
+        val params = vaultService.params(call.caller())
+        call.respond(VaultParamsResponse(salt = params.saltVault.toBase64(), kdf = params.kdf))
+    }
+
     post("/vault") {
         val caller = call.caller()
         val vault = call.receive<CreateVaultRequest>().validate(caller)
