@@ -83,6 +83,15 @@ class ItemService(
         return ItemSecret(rev = stored.rev, secret = secret)
     }
 
+    /**
+     * DELETE /items: löscht einen Eintrag. Gibt es ihn nicht (auch beim zweiten Löschen) → [NotFound].
+     * Schutzklassen und trusted-Geräte sind gestrichen, deshalb keine weiteren Prüfungen.
+     * Offen laut Doku: erwartete rev mitschicken, damit kein inzwischen geänderter Eintrag gelöscht wird.
+     */
+    suspend fun delete(caller: Caller, itemId: String) {
+        if (!repository.delete(caller.userId, itemId)) throw NotFound()
+    }
+
     private companion object {
         const val MAX_PARALLEL_DECRYPTS = 8
     }

@@ -12,6 +12,7 @@ import de.trustylynx.domain.VaultService
 import de.trustylynx.domain.VaultSession
 import de.trustylynx.security.VaultToken
 import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.put
@@ -297,7 +298,63 @@ class ItemRoutesTest {
         assertEquals(HttpStatusCode.BadGateway, getSecret().status)
     }
 
+    // ---------- DELETE /items ----------
+
+    @Test
+    fun `loescht den Eintrag mit 204`() = itemTest {
+        itemRepository.items["u42" to ITEM_ID] = StoredItem(ITEM_ID, 1, byteArrayOf(9), byteArrayOf(9))
+        itemRepository.items["u42" to "andere"] = StoredItem("andere", 1, byteArrayOf(9), byteArrayOf(9))
+
+        val response = deleteItem()
+
+        assertEquals(HttpStatusCode.NoContent, response.status)
+        assertEquals(setOf("u42" to "andere"), itemRepository.items.keys)
+        assertTrue(cryptoService.calls.isEmpty())
+    }
+
+    @Test
+    fun `zweites Loeschen ergibt 404`() = itemTest {
+        itemRepository.items["u42" to ITEM_ID] = StoredItem(ITEM_ID, 1, byteArrayOf(9), byteArrayOf(9))
+
+        assertEquals(HttpStatusCode.NoContent, deleteItem().status)
+        assertEquals(HttpStatusCode.NotFound, deleteItem().status)
+    }
+
+    @Test
+    fun `Eintrag eines anderen Nutzers wird nicht geloescht, 404`() = itemTest {
+        itemRepository.items["u43" to ITEM_ID] = StoredItem(ITEM_ID, 1, byteArrayOf(9), byteArrayOf(9))
+
+        assertEquals(HttpStatusCode.NotFound, deleteItem().status)
+        assertTrue(("u43" to ITEM_ID) in itemRepository.items)
+    }
+
+    @Test
+    fun `DELETE ohne Tresor-Token ergibt 401 vault_locked und loescht nichts`() = itemTest {
+        itemRepository.items["u42" to ITEM_ID] = StoredItem(ITEM_ID, 1, byteArrayOf(9), byteArrayOf(9))
+
+        val response = client.delete("/items") {
+            callerHeaders()
+            header(ITEM_ID_HEADER, ITEM_ID)
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertTrue(response.bodyAsText().contains("vault_locked"))
+        assertTrue(("u42" to ITEM_ID) in itemRepository.items)
+    }
+
+    @Test
+    fun `DELETE ohne oder mit ungueltiger X-Item-Id ergibt 400`() = itemTest {
+        assertEquals(HttpStatusCode.BadRequest, deleteItem(itemId = null).status)
+        assertEquals(HttpStatusCode.BadRequest, deleteItem(itemId = "a|b").status)
+    }
+
     // ---------- Hilfen ----------
+
+    private suspend fun ApplicationTestBuilder.deleteItem(itemId: String? = ITEM_ID): HttpResponse = client.delete("/items") {
+        callerHeaders()
+        header(VAULT_TOKEN_HEADER, token)
+        if (itemId != null) header(ITEM_ID_HEADER, itemId)
+    }
 
     private suspend fun ApplicationTestBuilder.getSecret(itemId: String? = ITEM_ID): HttpResponse = client.get("/items/secret") {
         callerHeaders()

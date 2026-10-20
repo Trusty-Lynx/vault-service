@@ -55,6 +55,21 @@ class CorsTest {
     }
 
     @Test
+    fun `Preflight fuer PUT und DELETE auf items wird erlaubt`() = corsTest {
+        for (method in listOf("PUT", "DELETE")) {
+            val response = client.options("/items") {
+                header(HttpHeaders.Origin, "http://localhost:3000")
+                header(HttpHeaders.AccessControlRequestMethod, method)
+                header(HttpHeaders.AccessControlRequestHeaders, "content-type,x-vault-token,x-item-id")
+            }
+
+            assertTrue(response.status.value in 200..299, "$method: status ${response.status}")
+            val allowed = assertNotNull(response.headers[HttpHeaders.AccessControlAllowMethods], method)
+            assertTrue(method in allowed, "$method fehlt in $allowed")
+        }
+    }
+
+    @Test
     fun `Preflight mit unbekanntem Header wird abgelehnt`() = corsTest {
         val response = preflight("http://localhost:3000", "content-type,x-evil")
 
