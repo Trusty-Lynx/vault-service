@@ -11,9 +11,6 @@ import io.ktor.server.plugins.cors.routing.CORS
 private val LOCAL_ORIGIN = Regex("""^http://(localhost|127\.0\.0\.1):\d+$""")
 private val ORIGIN = Regex("""^https?://[a-z0-9.-]+(:\d+)?$""")
 
-/** Header, mit dem der Client den Tresor-Token schickt (GET /items usw., kommt mit den Item-Endpunkten). */
-const val VAULT_TOKEN_HEADER = "X-Vault-Token"
-
 data class CorsConfig(
     val allowedOrigins: Set<String> = emptySet(),
     val allowNullOrigin: Boolean = false,

@@ -8,6 +8,9 @@ const val USER_ID_HEADER = "X-User-Id"
 const val DEVICE_ID_HEADER = "X-Device-Id"
 const val SESSION_ID_HEADER = "X-Session-Id"
 
+/** Tresor-Token, ausgestellt von POST /vault und POST /vault/unlock. Braucht jeder Endpunkt hinter dem Entsperren. */
+const val VAULT_TOKEN_HEADER = "X-Vault-Token"
+
 private val ID = Regex("^[A-Za-z0-9._-]{1,128}$")
 
 /** Gleiches Format für userId, deviceId und sessionId, egal ob sie aus einem Header oder vom Auth-Service kommen. */

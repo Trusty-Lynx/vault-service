@@ -3,6 +3,7 @@ package de.trustylynx
 import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.CryptoServiceClient
 import de.trustylynx.clients.KeyServiceClient
+import de.trustylynx.common.Caller
 import de.trustylynx.common.CorsConfig
 import de.trustylynx.domain.Vault
 import de.trustylynx.domain.VaultService
@@ -17,6 +18,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.config.MapApplicationConfig
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -159,6 +161,9 @@ class CorsTest {
         override suspend fun find(userId: String) = error("unused")
         override suspend fun create(vault: Vault, session: VaultSession) = error("unused")
         override suspend fun createSession(session: VaultSession) = error("unused")
+        override suspend fun touchSession(tokenHash: ByteArray, caller: Caller, now: Instant, newExpiresAt: Instant) = error("unused")
+        override suspend fun deleteSession(tokenHash: ByteArray, caller: Caller, now: Instant) = error("unused")
+        override suspend fun deleteExpiredSessions(userId: String, now: Instant) = error("unused")
     }
 
     private object UnusedKeyService : KeyServiceClient {
