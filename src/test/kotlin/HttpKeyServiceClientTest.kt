@@ -23,6 +23,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class HttpKeyServiceClientTest {
 
@@ -70,6 +71,15 @@ class HttpKeyServiceClientTest {
         val client = clientRespondingWith { throw java.net.ConnectException("Connection refused") }
 
         assertFailsWith<UpstreamException> { client.pepperHmac("u42", UNLOCK_KEY) }
+    }
+
+    @Test
+    fun `Hostname nicht aufloesbar wird zu UpstreamException`() = runBlocking<Unit> {
+        // So meldet der CIO-Client eine URL, deren Hostname es nicht gibt (keine IOException!)
+        val client = clientRespondingWith { throw java.nio.channels.UnresolvedAddressException() }
+
+        val error = assertFailsWith<UpstreamException> { client.pepperHmac("u42", UNLOCK_KEY) }
+        assertTrue(error.message!!.contains("key-service pepper-hmac"))
     }
 
     private fun clientRespondingWith(handler: MockRequestHandler): HttpKeyServiceClient {
