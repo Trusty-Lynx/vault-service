@@ -7,9 +7,12 @@ import de.trustylynx.common.withTransaction
 import de.trustylynx.domain.KdfParams
 import de.trustylynx.domain.Vault
 import de.trustylynx.domain.VaultSession
+import de.trustylynx.common.Caller
 import java.sql.Connection
+import java.sql.PreparedStatement
 import java.sql.SQLException
 import java.sql.Timestamp
+import java.time.Instant
 import javax.sql.DataSource
 
 class PostgresVaultRepository(private val dataSource: DataSource) : VaultRepository {
@@ -71,6 +74,53 @@ class PostgresVaultRepository(private val dataSource: DataSource) : VaultReposit
 
     override suspend fun createSession(session: VaultSession) = dataSource.withConnection { connection ->
         insertSession(connection, session)
+    }
+
+    // Prüfen und Verlängern in einem UPDATE: kein Zeitfenster zwischen "ist gültig" und "verlängern".
+    override suspend fun touchSession(tokenHash: ByteArray, caller: Caller, now: Instant, newExpiresAt: Instant): Boolean =
+        dataSource.withConnection { connection ->
+            connection.prepareStatement(
+                """
+                UPDATE vault_sessions SET expires_at = ?
+                WHERE token_hash = ? AND user_id = ? AND device_id = ? AND session_id = ? AND expires_at > ?
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setTimestamp(1, Timestamp.from(newExpiresAt))
+                bindSessionMatch(statement, firstIndex = 2, tokenHash, caller, now)
+                statement.executeUpdate() == 1
+            }
+        }
+
+    override suspend fun deleteSession(tokenHash: ByteArray, caller: Caller, now: Instant): Boolean =
+        dataSource.withConnection { connection ->
+            connection.prepareStatement(
+                """
+                DELETE FROM vault_sessions
+                WHERE token_hash = ? AND user_id = ? AND device_id = ? AND session_id = ? AND expires_at > ?
+                """.trimIndent(),
+            ).use { statement ->
+                bindSessionMatch(statement, firstIndex = 1, tokenHash, caller, now)
+                statement.executeUpdate() == 1
+            }
+        }
+
+    override suspend fun deleteExpiredSessions(userId: String, now: Instant) {
+        dataSource.withConnection { connection ->
+            connection.prepareStatement("DELETE FROM vault_sessions WHERE user_id = ? AND expires_at <= ?").use { statement ->
+                statement.setString(1, userId)
+                statement.setTimestamp(2, Timestamp.from(now))
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    /** Setzt die fünf Platzhalter von `token_hash = ? AND user_id = ? AND device_id = ? AND session_id = ? AND expires_at > ?`. */
+    private fun bindSessionMatch(statement: PreparedStatement, firstIndex: Int, tokenHash: ByteArray, caller: Caller, now: Instant) {
+        statement.setBytes(firstIndex, tokenHash)
+        statement.setString(firstIndex + 1, caller.userId)
+        statement.setString(firstIndex + 2, caller.deviceId)
+        statement.setString(firstIndex + 3, caller.sessionId)
+        statement.setTimestamp(firstIndex + 4, Timestamp.from(now))
     }
 
     private fun insertSession(connection: Connection, session: VaultSession) {

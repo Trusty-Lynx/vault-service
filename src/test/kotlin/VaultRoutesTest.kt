@@ -4,12 +4,15 @@ import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.CryptoServiceClient
 import de.trustylynx.clients.KeyServiceClient
 import de.trustylynx.common.AlreadyExists
+import de.trustylynx.common.Caller
 import de.trustylynx.common.DEVICE_ID_HEADER
 import de.trustylynx.common.IntegrityError
 import de.trustylynx.common.NO_DEVICE_ID
 import de.trustylynx.common.SESSION_ID_HEADER
 import de.trustylynx.common.USER_ID_HEADER
 import de.trustylynx.common.UpstreamException
+import de.trustylynx.common.VAULT_TOKEN_HEADER
+import de.trustylynx.common.VaultLocked
 import de.trustylynx.domain.KdfParams
 import de.trustylynx.domain.Vault
 import de.trustylynx.domain.VaultService
@@ -29,6 +32,7 @@ import io.ktor.http.contentType
 import io.ktor.server.config.MapApplicationConfig
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -42,6 +46,7 @@ import java.util.Base64
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -295,7 +300,137 @@ class VaultRoutesTest {
         assertTrue(repository.sessions.isEmpty())
     }
 
+    @Test
+    fun `unlock raeumt abgelaufene Tresor-Tokens des Nutzers weg`() = vaultTest {
+        repository.vault = storedVault()
+        repository.sessions += session(VaultToken.generate(), expiresAt = clock.instant().minusSeconds(1))
+        repository.sessions += session(VaultToken.generate(), userId = "u43", expiresAt = clock.instant().minusSeconds(1))
+
+        assertEquals(HttpStatusCode.OK, postUnlock(UNLOCK_KEY).status)
+
+        // Übrig: der neue Token von u42 und der abgelaufene von u43 (fremde Nutzer fasst unlock nicht an).
+        assertEquals(listOf("u42", "u43"), repository.sessions.map { it.userId }.sorted())
+        assertTrue(repository.sessions.single { it.userId == "u42" }.expiresAt.isAfter(clock.instant()))
+    }
+
+    // ---------- Tresor-Token (#7) ----------
+
+    @Test
+    fun `gueltiger Tresor-Token wird akzeptiert und um 15 min verlaengert`() = runBlocking<Unit> {
+        val token = VaultToken.generate()
+        repository.sessions += session(token, expiresAt = clock.instant().plusSeconds(60))
+
+        service().requireUnlocked(CALLER, token)
+
+        assertEquals(clock.instant().plus(Duration.ofMinutes(15)), repository.sessions.single().expiresAt)
+    }
+
+    @Test
+    fun `Tresor-Token fehlt, ist kaputt oder unbekannt ergibt vault_locked`() = runBlocking<Unit> {
+        repository.sessions += session(VaultToken.generate())
+
+        for (token in listOf(null, "", "zu-kurz", "x".repeat(43) + "!", VaultToken.generate())) {
+            assertFailsWith<VaultLocked>("token=$token") { service().requireUnlocked(CALLER, token) }
+        }
+    }
+
+    @Test
+    fun `abgelaufener Tresor-Token ergibt vault_locked und wird nicht verlaengert`() = runBlocking<Unit> {
+        val token = VaultToken.generate()
+        repository.sessions += session(token, expiresAt = clock.instant())
+
+        assertFailsWith<VaultLocked> { service().requireUnlocked(CALLER, token) }
+        assertEquals(clock.instant(), repository.sessions.single().expiresAt)
+    }
+
+    @Test
+    fun `Tresor-Token gilt nur fuer denselben Nutzer, dasselbe Geraet und dieselbe Login-Session`() = runBlocking<Unit> {
+        val token = VaultToken.generate()
+        repository.sessions += session(token)
+
+        for (other in listOf(
+            Caller("u43", "dev-mac-01", "s-1"),
+            Caller("u42", "dev-other", "s-1"),
+            // Login-Session beendet und neu eingeloggt → neue sessionId → alter Tresor-Token ist tot.
+            Caller("u42", "dev-mac-01", "s-2"),
+        )) {
+            assertFailsWith<VaultLocked>("caller=${other.userId}/${other.deviceId}/${other.sessionId}") {
+                service().requireUnlocked(other, token)
+            }
+        }
+    }
+
+    // ---------- POST /vault/lock ----------
+
+    @Test
+    fun `lock widerruft den Tresor-Token, danach ist er ungueltig`() = vaultTest {
+        val token = VaultToken.generate()
+        repository.sessions += session(token)
+
+        val response = postLock(token)
+
+        assertEquals(HttpStatusCode.NoContent, response.status)
+        assertTrue(repository.sessions.isEmpty())
+        assertFailsWith<VaultLocked> { service().requireUnlocked(CALLER, token) }
+    }
+
+    @Test
+    fun `lock zweimal ergibt beim zweiten Mal vault_locked`() = vaultTest {
+        val token = VaultToken.generate()
+        repository.sessions += session(token)
+
+        assertEquals(HttpStatusCode.NoContent, postLock(token).status)
+        val second = postLock(token)
+
+        assertEquals(HttpStatusCode.Unauthorized, second.status)
+        assertTrue(second.bodyAsText().contains("vault_locked"))
+    }
+
+    @Test
+    fun `lock ohne Tresor-Token ergibt vault_locked`() = vaultTest {
+        val response = postLock(null)
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertTrue(response.bodyAsText().contains("vault_locked"))
+    }
+
+    @Test
+    fun `lock betrifft nur den Token dieses Geraets`() = vaultTest {
+        val mine = VaultToken.generate()
+        val otherDevice = VaultToken.generate()
+        repository.sessions += session(mine)
+        repository.sessions += session(otherDevice, deviceId = "dev-phone")
+
+        assertEquals(HttpStatusCode.NoContent, postLock(mine).status)
+
+        assertEquals("dev-phone", repository.sessions.single().deviceId)
+    }
+
+    @Test
+    fun `lock mit dem Token eines anderen Geraets ergibt vault_locked und loescht nichts`() = vaultTest {
+        val otherDevice = VaultToken.generate()
+        repository.sessions += session(otherDevice, deviceId = "dev-phone")
+
+        assertEquals(HttpStatusCode.Unauthorized, postLock(otherDevice).status)
+        assertEquals(1, repository.sessions.size)
+    }
+
     // ---------- Hilfen ----------
+
+    private fun service() = VaultService(repository, keyService, cryptoService, clock)
+
+    private fun session(
+        token: String,
+        userId: String = "u42",
+        deviceId: String = "dev-mac-01",
+        sessionId: String = "s-1",
+        expiresAt: Instant = clock.instant().plus(Duration.ofMinutes(10)),
+    ) = VaultSession(VaultToken.hash(token), userId, deviceId, sessionId, expiresAt)
+
+    private suspend fun ApplicationTestBuilder.postLock(token: String?): HttpResponse = client.post("/vault/lock") {
+        callerHeaders()
+        if (token != null) header(VAULT_TOKEN_HEADER, token)
+    }
 
     private fun vaultTest(block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
         // Leere Config, damit nicht application.yaml geladen wird und module() mit echter DB startet.
@@ -359,6 +494,26 @@ class VaultRoutesTest {
         override suspend fun createSession(session: VaultSession) {
             sessions += session
         }
+
+        // Gleiche Bedingung wie im SQL von PostgresVaultRepository.
+        private fun VaultSession.matches(tokenHash: ByteArray, caller: Caller, now: Instant) =
+            this.tokenHash.contentEquals(tokenHash) && userId == caller.userId && deviceId == caller.deviceId &&
+                sessionId == caller.sessionId && expiresAt.isAfter(now)
+
+        override suspend fun touchSession(tokenHash: ByteArray, caller: Caller, now: Instant, newExpiresAt: Instant): Boolean {
+            val index = sessions.indexOfFirst { it.matches(tokenHash, caller, now) }
+            if (index < 0) return false
+            val old = sessions[index]
+            sessions[index] = VaultSession(old.tokenHash, old.userId, old.deviceId, old.sessionId, newExpiresAt)
+            return true
+        }
+
+        override suspend fun deleteSession(tokenHash: ByteArray, caller: Caller, now: Instant): Boolean =
+            sessions.removeIf { it.matches(tokenHash, caller, now) }
+
+        override suspend fun deleteExpiredSessions(userId: String, now: Instant) {
+            sessions.removeIf { it.userId == userId && !it.expiresAt.isAfter(now) }
+        }
     }
 
     private class FakeKeyService : KeyServiceClient {
@@ -405,6 +560,8 @@ class VaultRoutesTest {
     }
 
     private companion object {
+        /** Derselbe Aufrufer wie in callerHeaders(). */
+        val CALLER = Caller(userId = "u42", deviceId = "dev-mac-01", sessionId = "s-1")
         val SALT_VAULT = ByteArray(16) { 1 }
         val UNLOCK_KEY = ByteArray(32) { 2 }
         val WDEK = byteArrayOf(0x01, 0x01) + ByteArray(60) { 3 }

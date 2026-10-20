@@ -8,6 +8,7 @@ import de.trustylynx.common.Caller
 import de.trustylynx.common.NotFound
 import de.trustylynx.common.SecureRandomBytes
 import de.trustylynx.common.Unauthorized
+import de.trustylynx.common.VaultLocked
 import de.trustylynx.persistence.VaultRepository
 import de.trustylynx.security.VaultToken
 import de.trustylynx.security.VerifierHasher
@@ -98,8 +99,34 @@ class VaultService(
 
         val (token, session) = newSession(caller)
         repository.createSession(session)
+        // Gelegenheit zum Aufräumen: Abgelaufene Tokens dieses Nutzers braucht niemand mehr.
+        repository.deleteExpiredSessions(caller.userId, clock.instant())
         return UnlockedVault(vaultToken = token, expiresIn = VaultToken.IDLE_TIMEOUT, wdek = wdek)
     }
+
+    /**
+     * Issue #7: Prüft den Tresor-Token für jeden Endpunkt hinter dem Entsperren und verlängert ihn um 15 min.
+     * Gültig nur, wenn er zu userId, deviceId UND Login-Session des Aufrufers passt und nicht abgelaufen ist.
+     * Endet die Login-Session, passt die sessionId nicht mehr → der Tresor-Token ist damit automatisch ungültig.
+     * Fehlt, falsch, fremd oder abgelaufen → [VaultLocked] (401 vault_locked), ohne nach außen zu sagen, was genau.
+     */
+    suspend fun requireUnlocked(caller: Caller, vaultToken: String?) {
+        val tokenHash = hashIfWellFormed(vaultToken) ?: throw VaultLocked()
+        val now = clock.instant()
+        if (!repository.touchSession(tokenHash, caller, now, now.plus(VaultToken.IDLE_TIMEOUT))) throw VaultLocked()
+    }
+
+    /**
+     * POST /vault/lock: widerruft den Tresor-Token dieses Geräts. Andere Geräte bleiben entsperrt, der Login bleibt.
+     * Schon gesperrt, abgelaufen oder fremd → [VaultLocked]. Laut Doku räumt der Client dann trotzdem lokal auf.
+     */
+    suspend fun lock(caller: Caller, vaultToken: String?) {
+        val tokenHash = hashIfWellFormed(vaultToken) ?: throw VaultLocked()
+        if (!repository.deleteSession(tokenHash, caller, clock.instant())) throw VaultLocked()
+    }
+
+    private fun hashIfWellFormed(vaultToken: String?): ByteArray? =
+        vaultToken?.takeIf(VaultToken::isWellFormed)?.let(VaultToken::hash)
 
     /**
      * Holt h = HMAC(pepper_vault, unlockKey) vom Key-Service und rechnet [block] damit.
