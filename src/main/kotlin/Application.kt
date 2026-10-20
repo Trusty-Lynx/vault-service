@@ -1,5 +1,6 @@
 package de.trustylynx
 
+import de.trustylynx.api.itemRoutes
 import de.trustylynx.api.vaultRoutes
 import de.trustylynx.clients.HttpCryptoServiceClient
 import de.trustylynx.clients.HttpKeyServiceClient
@@ -9,7 +10,9 @@ import de.trustylynx.common.configureSerialization
 import de.trustylynx.common.configureStatusPages
 import de.trustylynx.common.createDataSource
 import de.trustylynx.common.createServiceHttpClient
+import de.trustylynx.domain.ItemService
 import de.trustylynx.domain.VaultService
+import de.trustylynx.persistence.PostgresItemRepository
 import de.trustylynx.persistence.PostgresVaultRepository
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStopped
@@ -31,22 +34,25 @@ fun Application.module() {
         dataSource.close()
     }
 
+    val cryptoService = HttpCryptoServiceClient(http, config.cryptoServiceUrl, config.serviceTokenVault)
     val vaultService = VaultService(
         repository = PostgresVaultRepository(dataSource),
         keyService = HttpKeyServiceClient(http, config.keyServiceUrl, config.serviceTokenVault),
-        cryptoService = HttpCryptoServiceClient(http, config.cryptoServiceUrl, config.serviceTokenVault),
+        cryptoService = cryptoService,
     )
+    val itemService = ItemService(PostgresItemRepository(dataSource), cryptoService)
 
-    configureApp(vaultService, config.cors)
+    configureApp(vaultService, itemService, config.cors)
 }
 
 /** Plugins und Routen, getrennt von [module], damit Tests Fakes einsetzen können. */
-fun Application.configureApp(vaultService: VaultService, cors: CorsConfig = CorsConfig()) {
+fun Application.configureApp(vaultService: VaultService, itemService: ItemService, cors: CorsConfig = CorsConfig()) {
     // Zuerst, damit auch Fehlerantworten (401, 502 …) die CORS-Header tragen, sonst sieht der Browser nur "CORS error".
     configureCors(cors)
     configureSerialization()
     configureStatusPages()
     routing {
         vaultRoutes(vaultService)
+        itemRoutes(vaultService, itemService)
     }
 }

@@ -23,6 +23,10 @@ fun Application.configureStatusPages() {
             if (cause is IntegrityError) {
                 call.application.log.error("Integrity error on ${call.request.httpMethod.value} ${call.request.path()}")
             }
+            if (cause is RevConflict) {
+                call.respond(cause.status, RevConflictResponse(cause.code, cause.currentRev))
+                return@exception
+            }
             call.respond(cause.status, ErrorResponse(cause.code, cause.reason))
         }
         // Kaputtes oder unvollständiges JSON bei call.receive()

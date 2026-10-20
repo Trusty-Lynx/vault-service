@@ -70,6 +70,7 @@ fun Application.configureCors(config: CorsConfig) {
         allowHeader(SESSION_ID_HEADER)
         allowHeader(DEVICE_ID_HEADER)
         allowHeader(VAULT_TOKEN_HEADER)
+        allowHeader(ITEM_ID_HEADER)
         allowHeader("X-Timestamp")
         allowHeader("X-Device-Sig")
         exposeHeader(HttpHeaders.RetryAfter)
