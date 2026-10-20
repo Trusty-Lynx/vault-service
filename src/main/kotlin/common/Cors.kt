@@ -1,6 +1,7 @@
 package de.trustylynx.common
 
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.application.log
@@ -63,6 +64,10 @@ fun Application.configureCors(config: CorsConfig) {
                 // bleibt CORS_ALLOW_NULL_ORIGIN false. Nie zusammen mit allowCredentials oder Cookies verwenden.
                 (config.allowNullOrigin && origin == "null")
         }
+        // Ktor erlaubt standardmäßig nur GET, POST und HEAD. PUT /items und DELETE /items brauchen das hier,
+        // sonst scheitert der Browser schon am Preflight (Bruno/curl merken davon nichts).
+        allowMethod(HttpMethod.Put)
+        allowMethod(HttpMethod.Delete)
         allowHeader(HttpHeaders.ContentType)
         allowHeader(HttpHeaders.Authorization)
         // Platzhalter bis #8: Solange wir den Login-Token nicht selbst prüfen, schickt der Client diese Header mit.

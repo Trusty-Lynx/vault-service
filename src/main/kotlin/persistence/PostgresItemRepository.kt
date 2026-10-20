@@ -73,4 +73,13 @@ class PostgresItemRepository(private val dataSource: DataSource) : ItemRepositor
             }
         }
     }
+
+    // user_id in der Bedingung: Ein Nutzer kann nie den Eintrag eines anderen löschen, auch nicht mit dessen itemId.
+    override suspend fun delete(userId: String, itemId: String): Boolean = dataSource.withConnection { connection ->
+        connection.prepareStatement("DELETE FROM items WHERE user_id = ? AND item_id = ?").use { statement ->
+            statement.setString(1, userId)
+            statement.setString(2, itemId)
+            statement.executeUpdate() == 1
+        }
+    }
 }

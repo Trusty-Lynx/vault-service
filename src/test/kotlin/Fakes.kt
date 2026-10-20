@@ -87,6 +87,8 @@ internal class FakeItemRepository : ItemRepository {
     override suspend fun findSecret(userId: String, itemId: String): StoredSecret? =
         items[userId to itemId]?.let { StoredSecret(it.rev, it.secretC2) }
 
+    override suspend fun delete(userId: String, itemId: String): Boolean = items.remove(userId to itemId) != null
+
     private fun StoredItem.copyWithRev(rev: Int) = StoredItem(itemId, rev, headC2, secretC2)
 }
 

@@ -6,10 +6,12 @@ import de.trustylynx.common.itemId
 import de.trustylynx.common.toBase64
 import de.trustylynx.domain.ItemService
 import de.trustylynx.domain.VaultService
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.put
 
@@ -33,6 +35,12 @@ fun Route.itemRoutes(vaultService: VaultService, itemService: ItemService) {
         val caller = call.unlockedCaller(vaultService)
         val item = call.receive<PutItemRequest>().validate(call.itemId())
         call.respond(PutItemResponse(rev = itemService.put(caller, item)))
+    }
+
+    delete("/items") {
+        val caller = call.unlockedCaller(vaultService)
+        itemService.delete(caller, call.itemId())
+        call.respond(HttpStatusCode.NoContent)
     }
 }
 

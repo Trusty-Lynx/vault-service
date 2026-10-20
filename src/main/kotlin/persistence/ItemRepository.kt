@@ -22,4 +22,7 @@ interface ItemRepository {
 
     /** Geheimnis und Revision eines Eintrags, oder null, wenn es ihn (für diesen Nutzer) nicht gibt. */
     suspend fun findSecret(userId: String, itemId: String): StoredSecret?
+
+    /** Löscht den Eintrag des Nutzers → true. Gibt es ihn nicht (mehr) → false. */
+    suspend fun delete(userId: String, itemId: String): Boolean
 }
