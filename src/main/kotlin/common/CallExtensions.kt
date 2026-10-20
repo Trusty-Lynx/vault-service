@@ -10,6 +10,13 @@ const val SESSION_ID_HEADER = "X-Session-Id"
 
 private val ID = Regex("^[A-Za-z0-9._-]{1,128}$")
 
+/**
+ * VORÜBERGEHEND: Ohne X-Device-Id wird dieser Platzhalter gespeichert. Dann ist der Tresor-Token
+ * an kein bestimmtes Gerät gebunden (alle Anfragen ohne Header gelten als dasselbe "Gerät").
+ * TODO: Wieder entfernen und X-Device-Id Pflicht machen (spätestens mit #8).
+ */
+const val NO_DEVICE_ID = "no-device"
+
 /** Wer die Anfrage stellt, laut Gateway. Die userId kommt immer von hier, nie aus dem Body. */
 class Caller(
     val userId: String,
@@ -17,15 +24,23 @@ class Caller(
     val sessionId: String,
 )
 
-/** Liest userId, deviceId und sessionId vom Gateway. Fehlt einer oder ist er ungültig → [Unauthorized]. */
+/**
+ * Liest userId, deviceId und sessionId vom Gateway. Fehlt userId oder sessionId oder ist ein Wert ungültig → [Unauthorized].
+ * deviceId ist vorübergehend optional, siehe [NO_DEVICE_ID].
+ */
 fun ApplicationCall.caller(): Caller = Caller(
     userId = requiredId(USER_ID_HEADER),
-    deviceId = requiredId(DEVICE_ID_HEADER),
+    // TODO: Wieder requiredId(DEVICE_ID_HEADER), sobald die Clients die deviceId mitschicken.
+    deviceId = optionalId(DEVICE_ID_HEADER) ?: NO_DEVICE_ID,
     sessionId = requiredId(SESSION_ID_HEADER),
 )
 
-private fun ApplicationCall.requiredId(header: String): String {
-    val value = request.headers[header]
-    if (value == null || !ID.matches(value)) throw Unauthorized()
+private fun ApplicationCall.requiredId(header: String): String =
+    optionalId(header) ?: throw Unauthorized()
+
+/** Fehlt der Header → null. Ist er da, aber ungültig → [Unauthorized] (kein stilles Ersetzen durch den Platzhalter). */
+private fun ApplicationCall.optionalId(header: String): String? {
+    val value = request.headers[header] ?: return null
+    if (!ID.matches(value)) throw Unauthorized()
     return value
 }

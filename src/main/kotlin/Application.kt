@@ -3,6 +3,8 @@ package de.trustylynx
 import de.trustylynx.api.vaultRoutes
 import de.trustylynx.clients.HttpCryptoServiceClient
 import de.trustylynx.clients.HttpKeyServiceClient
+import de.trustylynx.common.CorsConfig
+import de.trustylynx.common.configureCors
 import de.trustylynx.common.configureSerialization
 import de.trustylynx.common.configureStatusPages
 import de.trustylynx.common.createDataSource
@@ -35,11 +37,13 @@ fun Application.module() {
         cryptoService = HttpCryptoServiceClient(http, config.cryptoServiceUrl, config.serviceTokenVault),
     )
 
-    configureApp(vaultService)
+    configureApp(vaultService, config.cors)
 }
 
 /** Plugins und Routen, getrennt von [module], damit Tests Fakes einsetzen können. */
-fun Application.configureApp(vaultService: VaultService) {
+fun Application.configureApp(vaultService: VaultService, cors: CorsConfig = CorsConfig()) {
+    // Zuerst, damit auch Fehlerantworten (401, 502 …) die CORS-Header tragen, sonst sieht der Browser nur "CORS error".
+    configureCors(cors)
     configureSerialization()
     configureStatusPages()
     routing {
