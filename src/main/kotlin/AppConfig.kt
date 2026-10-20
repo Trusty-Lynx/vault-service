@@ -1,5 +1,6 @@
 package de.trustylynx
 
+import de.trustylynx.common.CorsConfig
 import de.trustylynx.common.DbConfig
 import de.trustylynx.common.envOrDev
 
@@ -9,10 +10,11 @@ class AppConfig(
     val keyServiceUrl: String,
     val cryptoServiceUrl: String,
     val serviceTokenVault: String,
+    val cors: CorsConfig,
 ) {
     // Ohne Service-Token, damit er nie im Log landet.
     override fun toString(): String =
-        "AppConfig(db=$db, keyServiceUrl=$keyServiceUrl, cryptoServiceUrl=$cryptoServiceUrl)"
+        "AppConfig(db=$db, keyServiceUrl=$keyServiceUrl, cryptoServiceUrl=$cryptoServiceUrl, cors=$cors)"
 
     companion object {
         fun fromEnv() = AppConfig(
@@ -24,10 +26,12 @@ class AppConfig(
             ),
             // Lokal läuft der Key-Service auf 7492 (siehe key-service/docker-compose.yml).
             keyServiceUrl = envOrDev("KEY_SERVICE_URL", "http://localhost:7492"),
-            // Crypto-Service 2 (ChaCha20), Server: https://crypto-chacha50poly1305.nexvent.de. Lokal 7494 ist ein Platzhalter.
+            // Crypto-Service 2 (ChaCha20), Server: https://chacha50poly1305.nexvent.de. Lokal 7494 ist ein Platzhalter.
             cryptoServiceUrl = envOrDev("CRYPTO_SERVICE_URL", "http://localhost:7494"),
             // Muss im Key-Service als VAULT_SERVICE_TOKEN hinterlegt sein (und im Crypto-Service).
             serviceTokenVault = envOrDev("SERVICE_TOKEN_VAULT", "dev-service-token-vault"),
+            // Optional: CORS_ALLOWED_ORIGINS (kommagetrennt), CORS_ALLOW_NULL_ORIGIN (nur lokal true). localhost geht immer.
+            cors = CorsConfig.fromEnv(),
         )
     }
 }
