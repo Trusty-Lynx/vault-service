@@ -11,6 +11,13 @@ const val SESSION_ID_HEADER = "X-Session-Id"
 /** Tresor-Token, ausgestellt von POST /vault und POST /vault/unlock. Braucht jeder Endpunkt hinter dem Entsperren. */
 const val VAULT_TOKEN_HEADER = "X-Vault-Token"
 
+/**
+ * Welcher Eintrag gemeint ist, bei PUT /items, GET /items/secret und DELETE /items.
+ * Abweichung von der Doku (dort im Pfad /items/{itemId}): Entscheid 2026-10-21, alles im Header.
+ * Die itemId ist nicht geheim, sie erzeugt der Client (z. B. UUID).
+ */
+const val ITEM_ID_HEADER = "X-Item-Id"
+
 private val ID = Regex("^[A-Za-z0-9._-]{1,128}$")
 
 /** Gleiches Format für userId, deviceId und sessionId, egal ob sie aus einem Header oder vom Auth-Service kommen. */
@@ -48,5 +55,12 @@ private fun ApplicationCall.requiredId(header: String): String =
 private fun ApplicationCall.optionalId(header: String): String? {
     val value = request.headers[header] ?: return null
     if (!isValidId(value)) throw Unauthorized()
+    return value
+}
+
+/** Die itemId aus [ITEM_ID_HEADER]. Fehlt oder ungültig → [BadRequest] (gleiche Zeichen wie die anderen IDs, UUIDs passen). */
+fun ApplicationCall.itemId(): String {
+    val value = request.headers[ITEM_ID_HEADER] ?: throw BadRequest("missing $ITEM_ID_HEADER")
+    if (!isValidId(value)) throw BadRequest("invalid $ITEM_ID_HEADER")
     return value
 }

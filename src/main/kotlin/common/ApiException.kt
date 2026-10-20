@@ -23,6 +23,12 @@ class NotFound : ApiException(HttpStatusCode.NotFound, "not_found")
 
 class AlreadyExists : ApiException(HttpStatusCode.Conflict, "already_exists")
 
+/**
+ * PUT /items: `rev` ist nicht aktuelle Revision + 1. [currentRev] geht mit in die Antwort (0 = Eintrag gibt es nicht),
+ * damit der Client den aktuellen Stand laden kann. Ist currentRev gleich der gesendeten rev, hat ein früherer Versuch schon geklappt.
+ */
+class RevConflict(val currentRev: Int) : ApiException(HttpStatusCode.Conflict, "rev_conflict")
+
 class TooManyRequests(val retryAfterSeconds: Long) :
     ApiException(HttpStatusCode.TooManyRequests, "too_many_requests")
 
@@ -34,6 +40,13 @@ class IntegrityError : ApiException(HttpStatusCode.InternalServerError, "integri
 
 /** Ein anderer Service hat nicht oder unbrauchbar geantwortet. Wird zu 502. */
 class UpstreamException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
+/** `409 { "error": "rev_conflict", "currentRev": 2 }` laut put-item.md. */
+@Serializable
+data class RevConflictResponse(
+    val error: String,
+    val currentRev: Int,
+)
 
 @Serializable
 data class ErrorResponse(
