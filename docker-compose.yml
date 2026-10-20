@@ -8,8 +8,14 @@ services:
       - "7493:8080"
     restart: unless-stopped
     env_file: .env
+    # trustylynx-net: andere Services (Key, Crypto). vault-db-net: die Vault-DB (Container vault-db).
+    networks:
+      - default
+      - vault-db-net
 
 networks:
   default:
     name: trustylynx-net
+    external: true
+  vault-db-net:
     external: true
