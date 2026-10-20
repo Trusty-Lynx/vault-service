@@ -17,6 +17,13 @@ data class CreateVaultResponse(
 )
 
 @Serializable
+data class VaultParamsResponse(
+    /** salt_vault, 16 Byte, Base64. */
+    val salt: String,
+    val kdf: KdfParams,
+)
+
+@Serializable
 data class UnlockVaultRequest(
     val unlockKey: String,
 )

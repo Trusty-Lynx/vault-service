@@ -16,6 +16,12 @@ import kotlinx.coroutines.withContext
 import java.time.Clock
 import java.time.Duration
 
+/** Ergebnis von GET /vault/params. */
+class VaultParams(
+    val saltVault: ByteArray,
+    val kdf: KdfParams,
+)
+
 /** Ergebnis von POST /vault/unlock. */
 class UnlockedVault(
     val vaultToken: String,
@@ -62,6 +68,15 @@ class VaultService(
             session,
         )
         return token
+    }
+
+    /**
+     * GET /vault/params (U1–U2): Salt und Argon2-Parameter, damit der Client aus dem Masterpasswort den unlockKey ableiten kann.
+     * Kein Tresor → [NotFound]. Kein Seiteneffekt, auch kein Tresor-Token.
+     */
+    suspend fun params(caller: Caller): VaultParams {
+        val vault = repository.find(caller.userId) ?: throw NotFound()
+        return VaultParams(saltVault = vault.saltVault, kdf = vault.kdf)
     }
 
     /**
