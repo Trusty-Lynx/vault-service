@@ -35,6 +35,9 @@ fun Application.module() {
         cryptoService = HttpCryptoServiceClient(http, config.cryptoServiceUrl, config.serviceTokenVault),
     )
 
+    // TODO(#8): Sobald der Auth-Service den Vault für /internal/sessions/verify zulässt, hier
+    //  LoginTokenVerifier(HttpAuthServiceClient(http, config.authServiceUrl, config.serviceTokenVault)) bauen
+    //  und in den Routen statt call.caller() verwenden.
     configureApp(vaultService)
 }
 

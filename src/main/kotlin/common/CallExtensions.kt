@@ -10,6 +10,9 @@ const val SESSION_ID_HEADER = "X-Session-Id"
 
 private val ID = Regex("^[A-Za-z0-9._-]{1,128}$")
 
+/** Gleiches Format für userId, deviceId und sessionId, egal ob sie aus einem Header oder vom Auth-Service kommen. */
+fun isValidId(value: String): Boolean = ID.matches(value)
+
 /**
  * VORÜBERGEHEND: Ohne X-Device-Id wird dieser Platzhalter gespeichert. Dann ist der Tresor-Token
  * an kein bestimmtes Gerät gebunden (alle Anfragen ohne Header gelten als dasselbe "Gerät").
@@ -41,6 +44,6 @@ private fun ApplicationCall.requiredId(header: String): String =
 /** Fehlt der Header → null. Ist er da, aber ungültig → [Unauthorized] (kein stilles Ersetzen durch den Platzhalter). */
 private fun ApplicationCall.optionalId(header: String): String? {
     val value = request.headers[header] ?: return null
-    if (!ID.matches(value)) throw Unauthorized()
+    if (!isValidId(value)) throw Unauthorized()
     return value
 }

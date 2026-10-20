@@ -1,6 +1,7 @@
 package de.trustylynx
 
 import de.trustylynx.common.DbConfig
+import de.trustylynx.common.env
 import de.trustylynx.common.envOrDev
 
 /** Alle Umgebungsvariablen des vault-service an einer Stelle. */
@@ -8,11 +9,12 @@ class AppConfig(
     val db: DbConfig,
     val keyServiceUrl: String,
     val cryptoServiceUrl: String,
+    val authServiceUrl: String,
     val serviceTokenVault: String,
 ) {
     // Ohne Service-Token, damit er nie im Log landet.
     override fun toString(): String =
-        "AppConfig(db=$db, keyServiceUrl=$keyServiceUrl, cryptoServiceUrl=$cryptoServiceUrl)"
+        "AppConfig(db=$db, keyServiceUrl=$keyServiceUrl, cryptoServiceUrl=$cryptoServiceUrl, authServiceUrl=$authServiceUrl)"
 
     companion object {
         fun fromEnv() = AppConfig(
@@ -26,7 +28,10 @@ class AppConfig(
             keyServiceUrl = envOrDev("KEY_SERVICE_URL", "http://localhost:7492"),
             // Crypto-Service 2 (ChaCha20), Server: https://crypto-chacha50poly1305.nexvent.de. Lokal 7494 ist ein Platzhalter.
             cryptoServiceUrl = envOrDev("CRYPTO_SERVICE_URL", "http://localhost:7494"),
-            // Muss im Key-Service als VAULT_SERVICE_TOKEN hinterlegt sein (und im Crypto-Service).
+            // Für POST /internal/sessions/verify (#8). Default ist der Container im trustylynx-net, lokal z. B. http://localhost:7491.
+            // Bewusst nicht envOrDev: Solange #8 nicht in den Routen hängt, soll ein fehlender Wert den Start nicht verhindern.
+            authServiceUrl = env("AUTH_SERVICE_URL", "http://auth-service:8080"),
+            // Muss im Key-Service als VAULT_SERVICE_TOKEN hinterlegt sein (und im Crypto-Service, und für #8 im Auth-Service).
             serviceTokenVault = envOrDev("SERVICE_TOKEN_VAULT", "dev-service-token-vault"),
         )
     }
