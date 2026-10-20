@@ -5,6 +5,11 @@ import de.trustylynx.clients.CryptoServiceClient
 import de.trustylynx.common.Caller
 import de.trustylynx.common.RevConflict
 import de.trustylynx.persistence.ItemRepository
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 /**
  * Einträge im Tresor. Der Tresor-Token ist hier schon geprüft (VaultService.requireUnlocked in den Routen).
@@ -39,5 +44,32 @@ class ItemService(
         }
         if (!saved) throw RevConflict(repository.currentRev(caller.userId, item.itemId) ?: 0)
         return item.rev
+    }
+
+    /**
+     * GET /items (D7): Köpfe aller Einträge, Schicht 2 abgenommen, also C1. Keine Passwörter.
+     * Teil h braucht kein Ticket. Ein manipulierter Kopf → IntegrityError (500) für die ganze Liste.
+     */
+    suspend fun listHeads(caller: Caller): List<ItemHead> {
+        val stored = repository.listHeads(caller.userId)
+        // Pro Kopf ein decrypt. Parallel, aber begrenzt, damit 500 Einträge nicht 500 gleichzeitige Anfragen werden.
+        val limit = Semaphore(MAX_PARALLEL_DECRYPTS)
+        return coroutineScope {
+            stored.map { item ->
+                async {
+                    limit.withPermit {
+                        ItemHead(
+                            itemId = item.itemId,
+                            rev = item.rev,
+                            head = cryptoService.decrypt(caller.userId, CryptoPart.HEAD, item.headC2, item.itemId),
+                        )
+                    }
+                }
+            }.awaitAll()
+        }
+    }
+
+    private companion object {
+        const val MAX_PARALLEL_DECRYPTS = 8
     }
 }

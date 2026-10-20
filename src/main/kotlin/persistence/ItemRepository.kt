@@ -1,5 +1,6 @@
 package de.trustylynx.persistence
 
+import de.trustylynx.domain.StoredHead
 import de.trustylynx.domain.StoredItem
 
 interface ItemRepository {
@@ -14,4 +15,7 @@ interface ItemRepository {
      * Hat ihn inzwischen jemand anderes geändert oder gelöscht → false.
      */
     suspend fun update(userId: String, item: StoredItem, previousRev: Int): Boolean
+
+    /** Köpfe aller Einträge des Nutzers (ohne Geheimnisse), sortiert nach itemId. Neuer Tresor → leere Liste. */
+    suspend fun listHeads(userId: String): List<StoredHead>
 }
