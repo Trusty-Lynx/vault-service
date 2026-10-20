@@ -19,6 +19,10 @@ fun Application.configureStatusPages() {
             if (cause is TooManyRequests) {
                 call.response.header(HttpHeaders.RetryAfter, cause.retryAfterSeconds.toString())
             }
+            // Manipulationsverdacht: muss im Log auffallen (Audit-Log ist gestrichen).
+            if (cause is IntegrityError) {
+                call.application.log.error("Integrity error on ${call.request.httpMethod.value} ${call.request.path()}")
+            }
             call.respond(cause.status, ErrorResponse(cause.code, cause.reason))
         }
         // Kaputtes oder unvollständiges JSON bei call.receive()

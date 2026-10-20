@@ -5,6 +5,7 @@ import de.trustylynx.clients.CryptoServiceClient
 import de.trustylynx.clients.KeyServiceClient
 import de.trustylynx.common.AlreadyExists
 import de.trustylynx.common.DEVICE_ID_HEADER
+import de.trustylynx.common.IntegrityError
 import de.trustylynx.common.SESSION_ID_HEADER
 import de.trustylynx.common.USER_ID_HEADER
 import de.trustylynx.common.UpstreamException
@@ -27,8 +28,10 @@ import io.ktor.server.config.MapApplicationConfig
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -48,12 +51,14 @@ class VaultRoutesTest {
     private val cryptoService = FakeCryptoService()
     private val clock = Clock.fixed(Instant.parse("2026-10-19T12:00:00Z"), ZoneOffset.UTC)
 
+    // ---------- POST /vault ----------
+
     @Test
     fun `POST vault legt Tresor an und liefert Tresor-Token`() = vaultTest {
         val response = postVault(VALID_BODY)
 
         assertEquals(HttpStatusCode.Created, response.status)
-        val token = Json.parseToJsonElement(response.bodyAsText()).jsonObject.getValue("vaultToken").jsonPrimitive.content
+        val token = response.json().getValue("vaultToken").jsonPrimitive.content
 
         val vault = assertNotNull(repository.vault)
         assertEquals("u42", vault.userId)
@@ -61,7 +66,7 @@ class VaultRoutesTest {
         assertEquals(KdfParams.DEFAULT, vault.kdf)
         assertEquals(VerifierHasher.SALT_LENGTH, vault.saltSVault.size)
         // vault_verifier = Argon2id(h vom Key-Service, salt_s_vault)
-        assertContentEquals(VerifierHasher.hash(FakeKeyService.H, vault.saltSVault), vault.vaultVerifier)
+        assertContentEquals(VerifierHasher.hash(FakeKeyService.h(UNLOCK_KEY), vault.saltSVault), vault.vaultVerifier)
         // gespeichert wird nur, was der Crypto-Service zurückgibt
         assertContentEquals(FakeCryptoService.c2Of(WDEK), vault.wdekC2)
 
@@ -69,7 +74,7 @@ class VaultRoutesTest {
         assertContentEquals(UNLOCK_KEY, keyService.calledWith?.second)
         assertEquals(Triple("u42", CryptoPart.DEK, null), cryptoService.calledWith)
 
-        val session = assertNotNull(repository.session)
+        val session = repository.sessions.single()
         assertContentEquals(VaultToken.hash(token), session.tokenHash)
         assertEquals("dev-mac-01", session.deviceId)
         assertEquals("s-1", session.sessionId)
@@ -78,7 +83,7 @@ class VaultRoutesTest {
 
     @Test
     fun `POST vault zweimal ergibt 409 ohne Key- und Crypto-Service`() = vaultTest {
-        repository.existing = true
+        repository.vault = storedVault()
 
         val response = postVault(VALID_BODY)
 
@@ -129,6 +134,93 @@ class VaultRoutesTest {
         assertNull(repository.vault)
     }
 
+    // ---------- POST /vault/unlock ----------
+
+    @Test
+    fun `unlock mit richtigem unlockKey liefert wDEK und neuen Tresor-Token`() = vaultTest {
+        repository.vault = storedVault()
+
+        val response = postUnlock(UNLOCK_KEY)
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val json = response.json()
+        assertEquals(900, json.getValue("expiresIn").jsonPrimitive.long)
+        // wDEK = wdek_c2 ohne Schicht 2, genau so, wie der Client ihn bei POST /vault geschickt hat
+        assertEquals(b64(WDEK), json.getValue("wdek").jsonPrimitive.content)
+        assertEquals(Triple("u42", CryptoPart.DEK, null), cryptoService.calledWith)
+
+        val token = json.getValue("vaultToken").jsonPrimitive.content
+        val session = repository.sessions.single()
+        assertContentEquals(VaultToken.hash(token), session.tokenHash)
+        assertEquals("u42", session.userId)
+        assertEquals("dev-mac-01", session.deviceId)
+        assertEquals("s-1", session.sessionId)
+        assertEquals(clock.instant().plus(Duration.ofMinutes(15)), session.expiresAt)
+    }
+
+    @Test
+    fun `unlock mit falschem unlockKey ergibt 401 ohne wDEK und Token`() = vaultTest {
+        repository.vault = storedVault()
+
+        val response = postUnlock(ByteArray(32) { 9 })
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertTrue(response.bodyAsText().contains("unauthorized"))
+        assertNull(cryptoService.calledWith)
+        assertTrue(repository.sessions.isEmpty())
+    }
+
+    @Test
+    fun `unlock ohne Tresor ergibt 404 ohne Key-Service`() = vaultTest {
+        val response = postUnlock(UNLOCK_KEY)
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        assertNull(keyService.calledWith)
+    }
+
+    @Test
+    fun `unlock mit unlockKey falscher Laenge ergibt 400`() = vaultTest {
+        repository.vault = storedVault()
+
+        assertEquals(HttpStatusCode.BadRequest, postUnlock(ByteArray(31)).status)
+        assertNull(keyService.calledWith)
+    }
+
+    @Test
+    fun `unlock ohne Caller-Header ergibt 401`() = vaultTest {
+        repository.vault = storedVault()
+
+        val response = client.post("/vault/unlock") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"unlockKey":"${b64(UNLOCK_KEY)}"}""")
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+    }
+
+    @Test
+    fun `unlock mit manipuliertem wdek_c2 ergibt 500 integrity_error ohne Token`() = vaultTest {
+        repository.vault = storedVault()
+        cryptoService.integrityError = true
+
+        val response = postUnlock(UNLOCK_KEY)
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status)
+        assertTrue(response.bodyAsText().contains("integrity_error"))
+        assertTrue(repository.sessions.isEmpty())
+    }
+
+    @Test
+    fun `unlock mit nicht erreichbarem Crypto-Service ergibt 502 ohne Token`() = vaultTest {
+        repository.vault = storedVault()
+        cryptoService.fail = true
+
+        assertEquals(HttpStatusCode.BadGateway, postUnlock(UNLOCK_KEY).status)
+        assertTrue(repository.sessions.isEmpty())
+    }
+
+    // ---------- Hilfen ----------
+
     private fun vaultTest(block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
         // Leere Config, damit nicht application.yaml geladen wird und module() mit echter DB startet.
         environment { config = MapApplicationConfig() }
@@ -137,25 +229,55 @@ class VaultRoutesTest {
     }
 
     private suspend fun ApplicationTestBuilder.postVault(body: String): HttpResponse = client.post("/vault") {
-        header(USER_ID_HEADER, "u42")
-        header(DEVICE_ID_HEADER, "dev-mac-01")
-        header(SESSION_ID_HEADER, "s-1")
+        callerHeaders()
         contentType(ContentType.Application.Json)
         setBody(body)
     }
 
+    private suspend fun ApplicationTestBuilder.postUnlock(unlockKey: ByteArray): HttpResponse = client.post("/vault/unlock") {
+        callerHeaders()
+        contentType(ContentType.Application.Json)
+        setBody("""{"unlockKey":"${b64(unlockKey)}"}""")
+    }
+
+    private fun io.ktor.client.request.HttpRequestBuilder.callerHeaders() {
+        header(USER_ID_HEADER, "u42")
+        header(DEVICE_ID_HEADER, "dev-mac-01")
+        header(SESSION_ID_HEADER, "s-1")
+    }
+
+    private suspend fun HttpResponse.json(): JsonObject = Json.parseToJsonElement(bodyAsText()).jsonObject
+
+    /** Ein Tresor, wie POST /vault ihn mit UNLOCK_KEY und WDEK angelegt hätte. */
+    private fun storedVault(): Vault {
+        val saltSVault = ByteArray(16) { 4 }
+        return Vault(
+            userId = "u42",
+            saltVault = SALT_VAULT,
+            kdf = KdfParams.DEFAULT,
+            saltSVault = saltSVault,
+            vaultVerifier = VerifierHasher.hash(FakeKeyService.h(UNLOCK_KEY), saltSVault),
+            wdekC2 = FakeCryptoService.c2Of(WDEK),
+        )
+    }
+
     private class FakeVaultRepository : VaultRepository {
-        var existing = false
         var failWithConflict = false
         var vault: Vault? = null
-        var session: VaultSession? = null
+        val sessions = mutableListOf<VaultSession>()
 
-        override suspend fun exists(userId: String) = existing
+        override suspend fun exists(userId: String) = vault?.userId == userId
+
+        override suspend fun find(userId: String) = vault?.takeIf { it.userId == userId }
 
         override suspend fun create(vault: Vault, session: VaultSession) {
             if (failWithConflict) throw AlreadyExists()
             this.vault = vault
-            this.session = session
+            sessions += session
+        }
+
+        override suspend fun createSession(session: VaultSession) {
+            sessions += session
         }
     }
 
@@ -166,16 +288,18 @@ class VaultRoutesTest {
         override suspend fun pepperHmac(userId: String, unlockKey: ByteArray): ByteArray {
             calledWith = userId to unlockKey.copyOf()
             if (fail) throw UpstreamException("key-service down")
-            return H.copyOf()
+            return h(unlockKey)
         }
 
         companion object {
-            val H = ByteArray(32) { 7 }
+            // Kein echtes HMAC, aber wie HMAC: anderer unlockKey → anderes h.
+            fun h(unlockKey: ByteArray): ByteArray = ByteArray(32) { (unlockKey[it] + 1).toByte() }
         }
     }
 
     private class FakeCryptoService : CryptoServiceClient {
         var fail = false
+        var integrityError = false
         var calledWith: Triple<String, CryptoPart, String?>? = null
 
         override suspend fun encrypt(userId: String, part: CryptoPart, c1: ByteArray, itemId: String?): ByteArray {
@@ -184,10 +308,19 @@ class VaultRoutesTest {
             return c2Of(c1)
         }
 
+        override suspend fun decrypt(userId: String, part: CryptoPart, c2: ByteArray, itemId: String?): ByteArray {
+            calledWith = Triple(userId, part, itemId)
+            if (fail) throw UpstreamException("crypto-service down")
+            if (integrityError) throw IntegrityError()
+            return c2.copyOfRange(HEADER.size, c2.size - FILLER)
+        }
+
         companion object {
-            // Kein echtes AES, nur erkennbar: TLX2-Header + c1 + 28 Byte Füllung = c1 + 36 Byte
-            fun c2Of(c1: ByteArray): ByteArray =
-                byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, 0x01, 0x00, 0x01) + c1 + ByteArray(28)
+            private val HEADER = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, 0x02, 0x00, 0x01)
+            private const val FILLER = 28
+
+            // Kein echtes ChaCha20, nur erkennbar: TLX2-Header + c1 + 28 Byte Füllung = c1 + 36 Byte
+            fun c2Of(c1: ByteArray): ByteArray = HEADER + c1 + ByteArray(FILLER)
         }
     }
 

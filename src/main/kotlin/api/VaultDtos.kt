@@ -15,3 +15,16 @@ data class CreateVaultRequest(
 data class CreateVaultResponse(
     val vaultToken: String,
 )
+
+@Serializable
+data class UnlockVaultRequest(
+    val unlockKey: String,
+)
+
+@Serializable
+data class UnlockVaultResponse(
+    val vaultToken: String,
+    /** Sekunden ohne Tresor-Anfrage bis zur serverseitigen Sperre (900 = 15 min). */
+    val expiresIn: Long,
+    val wdek: String,
+)

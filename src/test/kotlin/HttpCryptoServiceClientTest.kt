@@ -2,6 +2,7 @@ package de.trustylynx
 
 import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.HttpCryptoServiceClient
+import de.trustylynx.common.IntegrityError
 import de.trustylynx.common.SERVICE_TOKEN_HEADER
 import de.trustylynx.common.ServiceJson
 import de.trustylynx.common.UpstreamException
@@ -32,7 +33,7 @@ class HttpCryptoServiceClientTest {
 
     @Test
     fun `encrypt schickt dek ohne itemId und liefert C2`() = runBlocking<Unit> {
-        val c2 = TLX2_AES + WDEK + ByteArray(28)
+        val c2 = TLX2_CHACHA + WDEK + ByteArray(28)
         val client = clientRespondingWith { request ->
             assertEquals("http://crypto-1/internal/encrypt", request.url.toString())
             assertEquals(SERVICE_TOKEN, request.headers[SERVICE_TOKEN_HEADER])
@@ -52,15 +53,15 @@ class HttpCryptoServiceClientTest {
 
     @Test
     fun `C2 mit falscher Laenge wird zu UpstreamException`() = runBlocking<Unit> {
-        val client = clientRespondingWith { respondJson("""{"c2":"${b64(TLX2_AES + WDEK)}"}""") }
+        val client = clientRespondingWith { respondJson("""{"c2":"${b64(TLX2_CHACHA + WDEK)}"}""") }
 
         assertFailsWith<UpstreamException> { client.encrypt("u42", CryptoPart.DEK, WDEK) }
     }
 
     @Test
-    fun `C2 ohne TLX2-AES-Header wird zu UpstreamException`() = runBlocking<Unit> {
-        val chacha = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, 0x02, 0x00, 0x01) + WDEK + ByteArray(28)
-        val client = clientRespondingWith { respondJson("""{"c2":"${b64(chacha)}"}""") }
+    fun `C2 ohne TLX2-ChaCha-Header wird zu UpstreamException`() = runBlocking<Unit> {
+        val aes = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, 0x01, 0x00, 0x01) + WDEK + ByteArray(28)
+        val client = clientRespondingWith { respondJson("""{"c2":"${b64(aes)}"}""") }
 
         assertFailsWith<UpstreamException> { client.encrypt("u42", CryptoPart.DEK, WDEK) }
     }
@@ -79,6 +80,50 @@ class HttpCryptoServiceClientTest {
         assertFailsWith<UpstreamException> { client.encrypt("u42", CryptoPart.DEK, WDEK) }
     }
 
+    @Test
+    fun `decrypt schickt dek ohne itemId und liefert wDEK`() = runBlocking<Unit> {
+        val c2 = TLX2_CHACHA + WDEK + ByteArray(28)
+        val client = clientRespondingWith { request ->
+            assertEquals("http://crypto-1/internal/decrypt", request.url.toString())
+            assertEquals(SERVICE_TOKEN, request.headers[SERVICE_TOKEN_HEADER])
+
+            val body = Json.parseToJsonElement((request.body as TextContent).text).jsonObject
+            assertEquals("u42", body.getValue("userId").jsonPrimitive.content)
+            assertEquals("dek", body.getValue("part").jsonPrimitive.content)
+            assertEquals(b64(c2), body.getValue("c2").jsonPrimitive.content)
+            assertTrue("itemId" !in body || body["itemId"] == JsonNull)
+
+            respondJson("""{"c1":"${b64(WDEK)}"}""")
+        }
+
+        assertContentEquals(WDEK, client.decrypt("u42", CryptoPart.DEK, c2))
+    }
+
+    @Test
+    fun `decrypt mit integrity_error wird zu IntegrityError statt 502`() = runBlocking<Unit> {
+        val client = clientRespondingWith {
+            respondJson("""{"error":"integrity_error"}""", HttpStatusCode.InternalServerError)
+        }
+
+        assertFailsWith<IntegrityError> { client.decrypt("u42", CryptoPart.DEK, TLX2_CHACHA + WDEK + ByteArray(28)) }
+    }
+
+    @Test
+    fun `decrypt mit anderem 500er wird zu UpstreamException`() = runBlocking<Unit> {
+        val client = clientRespondingWith {
+            respondJson("""{"error":"internal_error"}""", HttpStatusCode.InternalServerError)
+        }
+
+        assertFailsWith<UpstreamException> { client.decrypt("u42", CryptoPart.DEK, TLX2_CHACHA + WDEK + ByteArray(28)) }
+    }
+
+    @Test
+    fun `decrypt mit C1 falscher Laenge wird zu UpstreamException`() = runBlocking<Unit> {
+        val client = clientRespondingWith { respondJson("""{"c1":"${b64(WDEK + 0)}"}""") }
+
+        assertFailsWith<UpstreamException> { client.decrypt("u42", CryptoPart.DEK, TLX2_CHACHA + WDEK + ByteArray(28)) }
+    }
+
     private fun clientRespondingWith(handler: MockRequestHandler): HttpCryptoServiceClient {
         val http = HttpClient(MockEngine(handler)) {
             expectSuccess = false
@@ -92,7 +137,7 @@ class HttpCryptoServiceClientTest {
 
     private companion object {
         const val SERVICE_TOKEN = "test-service-token-vault"
-        val TLX2_AES = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, 0x01, 0x00, 0x01)
+        val TLX2_CHACHA = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, 0x02, 0x00, 0x01)
         val WDEK = byteArrayOf(0x01, 0x01) + ByteArray(60) { 3 }
 
         fun b64(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)

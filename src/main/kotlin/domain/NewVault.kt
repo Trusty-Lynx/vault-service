@@ -4,7 +4,8 @@ import de.trustylynx.common.Caller
 
 /**
  * Bereits validierte Daten für POST /vault.
- * Keine Sicherheitsstufe: US-28 ist Won't, alles läuft über Crypto 1 (AES-256-GCM).
+ * Keine Sicherheitsstufe: US-28 ist Won't. Schicht 2 läuft immer über Crypto-Service 2 (ChaCha20-Poly1305),
+ * weil nur dieser Service existiert (Entscheid 2026-10-20).
  */
 class NewVault(
     val caller: Caller,
