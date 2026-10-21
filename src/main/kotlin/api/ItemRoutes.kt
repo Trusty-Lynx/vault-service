@@ -6,6 +6,7 @@ import de.trustylynx.common.itemId
 import de.trustylynx.common.toBase64
 import de.trustylynx.domain.ItemService
 import de.trustylynx.domain.VaultService
+import de.trustylynx.validation.validate
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receive

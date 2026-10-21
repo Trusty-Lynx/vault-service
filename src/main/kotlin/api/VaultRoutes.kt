@@ -3,8 +3,8 @@ package de.trustylynx.api
 import de.trustylynx.common.VAULT_TOKEN_HEADER
 import de.trustylynx.common.caller
 import de.trustylynx.common.toBase64
-import de.trustylynx.common.validateBase64
 import de.trustylynx.domain.VaultService
+import de.trustylynx.validation.validate
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receive
@@ -29,7 +29,7 @@ fun Route.vaultRoutes(vaultService: VaultService) {
 
     post("/vault/unlock") {
         val caller = call.caller()
-        val unlockKey = validateBase64(call.receive<UnlockVaultRequest>().unlockKey, UNLOCK_KEY_LENGTH)
+        val unlockKey = call.receive<UnlockVaultRequest>().validate()
         val unlocked = vaultService.unlock(caller, unlockKey)
         call.respond(
             UnlockVaultResponse(

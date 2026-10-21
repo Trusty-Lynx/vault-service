@@ -1,7 +1,7 @@
 package de.trustylynx.security
 
-import de.trustylynx.common.SecureRandomBytes
-import java.security.MessageDigest
+import de.trustylynx.common.secureRandomBytes
+import de.trustylynx.common.sha256
 import java.time.Duration
 import java.util.Base64
 
@@ -16,12 +16,12 @@ object VaultToken {
     private val FORMAT = Regex("^[A-Za-z0-9_-]{43}$")
 
     fun generate(): String =
-        Base64.getUrlEncoder().withoutPadding().encodeToString(SecureRandomBytes.next(LENGTH))
+        Base64.getUrlEncoder().withoutPadding().encodeToString(secureRandomBytes(LENGTH))
 
     /** Sieht aus wie ein von uns ausgestellter Token? Alles andere gar nicht erst in der DB suchen. */
     fun isWellFormed(token: String): Boolean = FORMAT.matches(token)
 
     // SHA-256 statt Argon2 reicht: 32 Zufallsbytes kann niemand erraten, da muss nichts gebremst werden.
     fun hash(token: String): ByteArray =
-        MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.US_ASCII))
+        sha256(token.toByteArray(Charsets.US_ASCII))
 }
