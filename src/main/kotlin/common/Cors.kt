@@ -70,9 +70,11 @@ fun Application.configureCors(config: CorsConfig) {
         allowMethod(HttpMethod.Delete)
         allowHeader(HttpHeaders.ContentType)
         allowHeader(HttpHeaders.Authorization)
-        // Platzhalter bis #8: Solange wir den Login-Token nicht selbst prüfen, schickt der Client diese Header mit.
-        allowHeader(USER_ID_HEADER)
-        allowHeader(SESSION_ID_HEADER)
+        // VORÜBERGEHEND: Die Website (dashboard.js) schickt noch die alten Platzhalter von vor #8 mit. Der Server ignoriert sie,
+        // aber ohne diese Zeilen würde der Browser schon den Preflight und damit jede Anfrage blockieren.
+        // TODO: Entfernen, sobald dashboard.js die beiden Header nicht mehr setzt.
+        allowHeader("X-User-Id")
+        allowHeader("X-Session-Id")
         allowHeader(DEVICE_ID_HEADER)
         allowHeader(VAULT_TOKEN_HEADER)
         allowHeader(ITEM_ID_HEADER)

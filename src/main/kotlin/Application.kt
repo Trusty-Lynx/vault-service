@@ -2,6 +2,7 @@ package de.trustylynx
 
 import de.trustylynx.api.itemRoutes
 import de.trustylynx.api.vaultRoutes
+import de.trustylynx.clients.HttpAuthServiceClient
 import de.trustylynx.clients.HttpCryptoServiceClient
 import de.trustylynx.clients.HttpKeyServiceClient
 import de.trustylynx.common.CorsConfig
@@ -18,6 +19,7 @@ import de.trustylynx.domain.ItemService
 import de.trustylynx.domain.VaultService
 import de.trustylynx.persistence.PostgresItemRepository
 import de.trustylynx.persistence.PostgresVaultRepository
+import de.trustylynx.security.LoginTokenVerifier
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStopped
 import io.ktor.server.netty.EngineMain
@@ -46,14 +48,16 @@ fun Application.module() {
         cryptoService = crypto,
     )
     val items = ItemService(PostgresItemRepository(dataSource), crypto)
+    val loginTokens = LoginTokenVerifier(HttpAuthServiceClient(httpClient, config.authServiceUrl, config.serviceTokenGateway))
 
-    configureApp(vaults, items, config.cors) { dataSource.isReachable() }
+    configureApp(vaults, items, loginTokens, config.cors) { dataSource.isReachable() }
 }
 
 /** Plugins und Routen, getrennt von [module], damit Tests Fakes einsetzen können. */
 fun Application.configureApp(
     vaults: VaultService,
     items: ItemService,
+    loginTokens: LoginTokenVerifier,
     cors: CorsConfig = CorsConfig(),
     isHealthy: suspend () -> Boolean = { true },
 ) {
@@ -64,7 +68,7 @@ fun Application.configureApp(
     configureStatusPages()
     routing {
         healthRoute(isHealthy)
-        vaultRoutes(vaults)
-        itemRoutes(vaults, items)
+        vaultRoutes(vaults, loginTokens)
+        itemRoutes(vaults, items, loginTokens)
     }
 }

@@ -19,9 +19,11 @@ Kotlin 2.4 · Ktor 3.6 · PostgreSQL 17 · Java 21
 | `DELETE` | `/items` | Eintrag löschen |
 | `GET` | `/health` | `200`, wenn Service und Datenbank laufen, sonst `503` |
 
-Alles außer `/vault`, `/vault/params` und `/vault/unlock` braucht den Tresor-Token im Header `X-Vault-Token`.
+Jeder Endpoint außer `/health` braucht den Login-Token vom Auth-Service: `Authorization: Bearer <login-token>`.
+Der Vault-Service prüft ihn bei jeder Anfrage selbst über `POST /internal/sessions/verify` (#8). Wer anfragt, kommt nur von dort.
+Alles außer `/vault`, `/vault/params` und `/vault/unlock` braucht zusätzlich den Tresor-Token im Header `X-Vault-Token`.
 Die `itemId` steht im Header `X-Item-Id`, nicht im Pfad (abweichend von der Doku, Entscheid 2026-10-21).
-Wer anfragt, steht vorerst in `X-User-Id`, `X-Session-Id` und optional `X-Device-Id` (Platzhalter bis #8).
+`X-Device-Id` ist vorerst optional.
 Felder, Fehler und Abläufe: [documentation/api/vault-service](https://github.com/Trusty-Lynx/documentation/tree/main/api/vault-service).
 
 ## Struktur
@@ -48,6 +50,7 @@ Andere Services, die hier aufgerufen werden:
 
 | Service | Endpoint | Wofür |
 |---|---|---|
+| Auth-Service | `POST /internal/sessions/verify` | Login-Token prüfen, mit dem Gateway-Token (`SERVICE_TOKEN_GATEWAY`) |
 | Key-Service | `POST /internal/pepper-hmac` | `h = HMAC(pepper_vault, unlockKey)` für den Tresor-Verifier |
 | Crypto-Service 2 (ChaCha20) | `POST /internal/encrypt` | Schicht 2 um wDEK, Kopf und Geheimnis |
 | Crypto-Service 2 (ChaCha20) | `POST /internal/decrypt` | Schicht 2 abnehmen |
@@ -82,10 +85,8 @@ Die `.env` liegt nur auf dem Server.
 
 ## Offen
 
-- **Login-Token prüfen (#8):** `security/LoginTokenVerifier.kt` ist fertig, aber noch nicht in den Routen.
-  Erst einhängen, wenn der Auth-Service den Vault als Aufrufer von `/internal/sessions/verify` zulässt.
-  Dann in den Routen `call.caller()` ersetzen und `X-User-Id` / `X-Session-Id` fallen weg.
-- **Geheimnis abrufen (#18):** Der ChaCha-Service verlangt bei `decrypt` mit Teil `s` noch ein Guard-Ticket und
-  antwortet sonst `403` (bei uns `502`). Ohne Guard muss die Prüfung dort entfallen.
+- **Eigener Token beim Auth-Service:** Für `/internal/sessions/verify` nutzen wir den Gateway-Token, weil der Auth-Service
+  keinen anderen kennt. Sauberer wäre ein eigener Vault-Token, dafür müsste der Auth-Service zwei Tokens akzeptieren.
+- **Geräte-Signatur** (`X-Timestamp`, `X-Device-Sig`) wird nicht geprüft.
 - **Vorübergehend:** `X-Device-Id` ist optional (`NO_DEVICE_ID`), und ohne `CORS_ALLOWED_ORIGINS` ist jede Origin erlaubt.
 - **Tresor beim Konto löschen:** In der Doku offen, wer das auslöst.

@@ -4,8 +4,6 @@ import de.trustylynx.clients.AuthServiceClient
 import de.trustylynx.clients.VerifiedSession
 import de.trustylynx.common.DEVICE_ID_HEADER
 import de.trustylynx.common.NO_DEVICE_ID
-import de.trustylynx.common.SESSION_ID_HEADER
-import de.trustylynx.common.USER_ID_HEADER
 import de.trustylynx.common.UpstreamException
 import de.trustylynx.common.configureSerialization
 import de.trustylynx.common.configureStatusPages
@@ -28,10 +26,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-/**
- * Der Verifier hängt noch in keiner echten Route (#8 wartet auf die Freigabe im Auth-Service).
- * Deshalb eine Test-Route, die nur den geprüften Caller zurückgibt.
- */
+/** Den Verifier allein testen, mit einer Test-Route, die nur den geprüften Caller zurückgibt. */
 class LoginTokenVerifierTest {
 
     private val auth = FakeAuthService()
@@ -42,7 +37,7 @@ class LoginTokenVerifierTest {
 
         assertEquals(HttpStatusCode.OK, response.status)
         assertEquals("u42|dev-mac-01|s-1", response.bodyAsText())
-        assertEquals(LOGIN_TOKEN to "dev-mac-01", auth.calledWith)
+        assertEquals(LOGIN_TOKEN, auth.calledWith)
     }
 
     @Test
@@ -50,19 +45,20 @@ class LoginTokenVerifierTest {
         val response = getMe {
             bearer(LOGIN_TOKEN)
             header(DEVICE_ID_HEADER, "dev-mac-01")
-            header(USER_ID_HEADER, "fremder-nutzer")
-            header(SESSION_ID_HEADER, "fremde-session")
+            // Die alten Platzhalter-Header von vor #8 dürfen nichts mehr bewirken.
+            header("X-User-Id", "fremder-nutzer")
+            header("X-Session-Id", "fremde-session")
         }
 
         assertEquals("u42|dev-mac-01|s-1", response.bodyAsText())
     }
 
     @Test
-    fun `ohne X-Device-Id nimmt vorerst den Platzhalter und schickt keine deviceId`() = verifierTest {
+    fun `ohne X-Device-Id nimmt vorerst den Platzhalter`() = verifierTest {
         val response = getMe { bearer(LOGIN_TOKEN) }
 
         assertEquals("u42|$NO_DEVICE_ID|s-1", response.bodyAsText())
-        assertEquals(LOGIN_TOKEN to null, auth.calledWith)
+        assertEquals(LOGIN_TOKEN, auth.calledWith)
     }
 
     @Test
@@ -98,13 +94,6 @@ class LoginTokenVerifierTest {
     }
 
     @Test
-    fun `Session eines anderen Geraets ergibt 401`() = verifierTest {
-        auth.session = session(deviceId = "dev-phone-02")
-
-        assertEquals(HttpStatusCode.Unauthorized, getMe { bearer(LOGIN_TOKEN); header(DEVICE_ID_HEADER, "dev-mac-01") }.status)
-    }
-
-    @Test
     fun `Auth-Service nicht erreichbar ergibt 502`() = verifierTest {
         auth.fail = true
 
@@ -136,11 +125,11 @@ class LoginTokenVerifierTest {
 
     private class FakeAuthService : AuthServiceClient {
         var fail = false
-        var session: VerifiedSession? = session(deviceId = "dev-mac-01")
-        var calledWith: Pair<String, String?>? = null
+        var session: VerifiedSession? = session()
+        var calledWith: String? = null
 
-        override suspend fun verifySession(token: String, deviceId: String?): VerifiedSession? {
-            calledWith = token to deviceId
+        override suspend fun verifySession(token: String): VerifiedSession? {
+            calledWith = token
             if (fail) throw UpstreamException("auth-service down")
             return session
         }
@@ -149,10 +138,9 @@ class LoginTokenVerifierTest {
     private companion object {
         const val LOGIN_TOKEN = "Zt7wP2kQ9xL4mN8vB1cR6yH3sJ0fD5gA2eU7iO4nK1M="
 
-        fun session(deviceId: String?) = VerifiedSession(
+        fun session() = VerifiedSession(
             userId = "u42",
             sessionId = "s-1",
-            deviceId = deviceId,
             expiresAt = Instant.parse("2026-10-20T12:00:00Z"),
         )
     }

@@ -1,8 +1,10 @@
 package de.trustylynx
 
+import de.trustylynx.clients.AuthServiceClient
 import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.CryptoServiceClient
 import de.trustylynx.clients.KeyServiceClient
+import de.trustylynx.clients.VerifiedSession
 import de.trustylynx.common.AlreadyExists
 import de.trustylynx.common.Caller
 import de.trustylynx.common.IntegrityError
@@ -15,6 +17,7 @@ import de.trustylynx.domain.VaultSession
 import de.trustylynx.persistence.ItemRepository
 import de.trustylynx.persistence.VaultRepository
 import java.time.Instant
+import java.util.Collections
 
 // Gemeinsame Fakes für VaultRoutesTest und ItemRoutesTest. Verhalten wie die Postgres-Repositories, nur im Speicher.
 
@@ -92,6 +95,25 @@ internal class FakeItemRepository : ItemRepository {
     private fun StoredItem.copyWithRev(rev: Int) = StoredItem(itemId, rev, headC2, secretC2)
 }
 
+/** Login-Token von u42 (Session s-1) und u43 (Session s-2), wie sie der Auth-Service bei /login ausgeben würde. */
+internal const val LOGIN_TOKEN = "login-token-u42"
+internal const val LOGIN_TOKEN_U43 = "login-token-u43"
+
+internal class FakeAuthService : AuthServiceClient {
+    var fail = false
+    var calls = 0
+    val sessions = mutableMapOf(
+        LOGIN_TOKEN to VerifiedSession("u42", "s-1", Instant.parse("2030-01-01T00:00:00Z")),
+        LOGIN_TOKEN_U43 to VerifiedSession("u43", "s-2", Instant.parse("2030-01-01T00:00:00Z")),
+    )
+
+    override suspend fun verifySession(token: String): VerifiedSession? {
+        calls++
+        if (fail) throw UpstreamException("auth-service down")
+        return sessions[token]
+    }
+}
+
 internal class FakeKeyService : KeyServiceClient {
     var fail = false
     var calledWith: Pair<String, ByteArray>? = null
@@ -112,8 +134,11 @@ internal class FakeCryptoService : CryptoServiceClient {
     var fail = false
     var integrityError = false
 
-    /** Alle Aufrufe in Reihenfolge: userId, part, itemId. */
-    val calls = mutableListOf<Triple<String, CryptoPart, String?>>()
+    /**
+     * Alle Aufrufe: userId, part, itemId. Synchronisiert, weil GET /items die Köpfe parallel entschlüsselt
+     * (eine normale Liste verliert dabei gelegentlich Einträge).
+     */
+    val calls: MutableList<Triple<String, CryptoPart, String?>> = Collections.synchronizedList(mutableListOf())
 
     /** Der letzte Aufruf (reicht für Tresor-Endpunkte, die nur einmal aufrufen). */
     val calledWith: Triple<String, CryptoPart, String?>? get() = calls.lastOrNull()

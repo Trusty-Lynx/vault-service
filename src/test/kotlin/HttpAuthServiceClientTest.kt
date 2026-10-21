@@ -23,14 +23,13 @@ import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class HttpAuthServiceClientTest {
 
     @Test
-    fun `verifySession schickt Token und deviceId und liefert die Session aus der Doku`() = runBlocking<Unit> {
+    fun `verifySession schickt nur den Token und liefert die Session`() = runBlocking<Unit> {
         val client = clientRespondingWith { request ->
             assertEquals(HttpMethod.Post, request.method)
             assertEquals("http://auth-service/internal/sessions/verify", request.url.toString())
@@ -38,51 +37,44 @@ class HttpAuthServiceClientTest {
 
             val body = Json.parseToJsonElement((request.body as TextContent).text).jsonObject
             assertEquals(LOGIN_TOKEN, body.getValue("token").jsonPrimitive.content)
-            assertEquals("dev-mac-01", body.getValue("deviceId").jsonPrimitive.content)
+            // Der Auth-Service lehnt unbekannte Felder mit 400 ab, deshalb wirklich nur {token}.
+            assertEquals(setOf("token"), body.keys)
 
             respondJson(VERIFY_RESPONSE)
         }
 
-        val session = assertNotNull(client.verifySession(LOGIN_TOKEN, "dev-mac-01"))
+        val session = assertNotNull(client.verifySession(LOGIN_TOKEN))
         assertEquals("3a0b4d3e-5c1f-4e2a-9b7d-1f2e3c4d5a6b", session.userId)
         assertEquals("9c1f7a2b-3d4e-4f5a-8b6c-7d8e9f0a1b2c", session.sessionId)
-        assertEquals("dev-mac-01", session.deviceId)
         assertEquals(Instant.ofEpochSecond(1791500000), session.expiresAt)
     }
 
     @Test
-    fun `ohne deviceId wird das Feld nicht mitgeschickt`() = runBlocking<Unit> {
-        // Für den Auth-Service nach dem Umbau ohne Guard: Body nur {token}, Antwort ohne deviceId.
-        val client = clientRespondingWith { request ->
-            val body = Json.parseToJsonElement((request.body as TextContent).text).jsonObject
-            assertFalse("deviceId" in body)
-            respondJson("""{"userId":"u42","sessionId":"s-1","expiresAt":1791500000}""")
-        }
+    fun `400 vom Auth-Service (Token-Format passt nicht) ergibt null statt 502`() = runBlocking<Unit> {
+        val client = clientRespondingWith { respondJson("""{"error":"bad_request","reason":"invalid token"}""", HttpStatusCode.BadRequest) }
 
-        val session = assertNotNull(client.verifySession(LOGIN_TOKEN, null))
-        assertEquals("u42", session.userId)
-        assertNull(session.deviceId)
+        assertNull(client.verifySession(LOGIN_TOKEN))
     }
 
     @Test
     fun `401 vom Auth-Service ergibt null`() = runBlocking<Unit> {
         val client = clientRespondingWith { respondJson("""{"error":"unauthorized"}""", HttpStatusCode.Unauthorized) }
 
-        assertNull(client.verifySession(LOGIN_TOKEN, "dev-mac-01"))
+        assertNull(client.verifySession(LOGIN_TOKEN))
     }
 
     @Test
-    fun `403 (Vault nicht freigeschaltet) wird zu UpstreamException`() = runBlocking<Unit> {
+    fun `403 (falscher Gateway-Token) wird zu UpstreamException`() = runBlocking<Unit> {
         val client = clientRespondingWith { respondJson("""{"error":"forbidden"}""", HttpStatusCode.Forbidden) }
 
-        assertFailsWith<UpstreamException> { client.verifySession(LOGIN_TOKEN, "dev-mac-01") }
+        assertFailsWith<UpstreamException> { client.verifySession(LOGIN_TOKEN) }
     }
 
     @Test
     fun `kaputter Body wird zu UpstreamException`() = runBlocking<Unit> {
         val client = clientRespondingWith { respondJson("""{"nope":1}""") }
 
-        assertFailsWith<UpstreamException> { client.verifySession(LOGIN_TOKEN, "dev-mac-01") }
+        assertFailsWith<UpstreamException> { client.verifySession(LOGIN_TOKEN) }
     }
 
     @Test
@@ -91,14 +83,14 @@ class HttpAuthServiceClientTest {
             respondJson("""{"userId":"u42|x","sessionId":"s-1","expiresAt":1791500000}""")
         }
 
-        assertFailsWith<UpstreamException> { client.verifySession(LOGIN_TOKEN, "dev-mac-01") }
+        assertFailsWith<UpstreamException> { client.verifySession(LOGIN_TOKEN) }
     }
 
     @Test
     fun `Auth-Service nicht erreichbar wird zu UpstreamException`() = runBlocking<Unit> {
         val client = clientRespondingWith { throw java.net.ConnectException("Connection refused") }
 
-        assertFailsWith<UpstreamException> { client.verifySession(LOGIN_TOKEN, "dev-mac-01") }
+        assertFailsWith<UpstreamException> { client.verifySession(LOGIN_TOKEN) }
     }
 
     private fun clientRespondingWith(handler: MockRequestHandler): HttpAuthServiceClient {
@@ -116,13 +108,12 @@ class HttpAuthServiceClientTest {
     ) = respond(json, status, headersOf(HttpHeaders.ContentType, "application/json"))
 
     private companion object {
-        const val SERVICE_TOKEN = "test-service-token-vault"
+        const val SERVICE_TOKEN = "test-service-token-gateway"
 
         // Beispiele aus auth-service/API.md
         const val LOGIN_TOKEN = "Zt7wP2kQ9xL4mN8vB1cR6yH3sJ0fD5gA2eU7iO4nK1M="
         const val VERIFY_RESPONSE = """{
             "userId": "3a0b4d3e-5c1f-4e2a-9b7d-1f2e3c4d5a6b",
-            "deviceId": "dev-mac-01",
             "sessionId": "9c1f7a2b-3d4e-4f5a-8b6c-7d8e9f0a1b2c",
             "expiresAt": 1791500000
         }"""

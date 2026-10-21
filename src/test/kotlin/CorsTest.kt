@@ -10,6 +10,7 @@ import de.trustylynx.domain.ItemService
 import de.trustylynx.domain.VaultService
 import de.trustylynx.domain.VaultSession
 import de.trustylynx.persistence.VaultRepository
+import de.trustylynx.security.LoginTokenVerifier
 import io.ktor.client.request.header
 import io.ktor.client.request.options
 import io.ktor.client.request.post
@@ -44,12 +45,12 @@ class CorsTest {
 
     @Test
     fun `Preflight von lokaler Origin erlaubt JSON und unsere Header`() = corsTest {
-        val response = preflight("http://localhost:3000", "content-type,x-user-id,x-session-id,x-device-id,x-vault-token")
+        val response = preflight("http://localhost:3000", "content-type,authorization,x-device-id,x-vault-token,x-item-id,x-request-id")
 
         assertTrue(response.status.value in 200..299, "status ${response.status}")
         assertEquals("http://localhost:3000", response.allowOrigin())
         val allowed = assertNotNull(response.headers[HttpHeaders.AccessControlAllowHeaders]).lowercase()
-        for (h in listOf("content-type", "x-user-id", "x-session-id", "x-device-id", "x-vault-token")) {
+        for (h in listOf("content-type", "authorization", "x-device-id", "x-vault-token", "x-item-id", "x-request-id")) {
             assertTrue(h in allowed, "$h fehlt in $allowed")
         }
     }
@@ -67,6 +68,15 @@ class CorsTest {
             val allowed = assertNotNull(response.headers[HttpHeaders.AccessControlAllowMethods], method)
             assertTrue(method in allowed, "$method fehlt in $allowed")
         }
+    }
+
+    @Test
+    fun `Preflight mit den alten Platzhalter-Headern der Website wird vorerst noch erlaubt`() = corsTest {
+        // So schickt dashboard.js es heute: Authorization plus die alten X-User-Id / X-Session-Id.
+        val response = preflight("http://127.0.0.1:5500", "authorization,content-type,x-user-id,x-session-id,x-vault-token,x-item-id")
+
+        assertTrue(response.status.value in 200..299, "status ${response.status}")
+        assertEquals("http://127.0.0.1:5500", response.allowOrigin())
     }
 
     @Test
@@ -101,7 +111,7 @@ class CorsTest {
         assertEquals(HttpStatusCode.Unauthorized, response.status)
         assertEquals("*", response.allowOrigin())
 
-        val preflight = preflight("https://website.example", "content-type,x-user-id,x-session-id")
+        val preflight = preflight("https://website.example", "content-type,authorization,x-vault-token")
         assertTrue(preflight.status.value in 200..299, "status ${preflight.status}")
     }
 
@@ -154,7 +164,7 @@ class CorsTest {
 
     private fun corsTest(cors: CorsConfig = CorsConfig(), block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApp(VaultService(UnusedRepository, UnusedKeyService, UnusedCryptoService), ItemService(FakeItemRepository(), UnusedCryptoService), cors) }
+        application { configureApp(VaultService(UnusedRepository, UnusedKeyService, UnusedCryptoService), ItemService(FakeItemRepository(), UnusedCryptoService), LoginTokenVerifier(FakeAuthService()), cors) }
         block()
     }
 

@@ -10,11 +10,9 @@ import io.ktor.http.HttpHeaders
 import io.ktor.server.application.ApplicationCall
 
 /**
- * Prüft den Login-Token selbst beim Auth-Service (Issue #8, Variante A), statt den Headern vom Gateway zu glauben.
- * Der [Caller] kommt danach nur aus der Antwort des Auth-Service, nie aus X-User-Id / X-Session-Id.
- *
- * NOCH NICHT IN DEN ROUTEN: Erst einhängen, wenn der Auth-Service den Vault als Aufrufer von
- * /internal/sessions/verify zulässt. Dann in den Routen `call.caller()` durch `loginTokens.verify(call)` ersetzen.
+ * Prüft den Login-Token bei jeder Anfrage selbst beim Auth-Service (Issue #8, Variante A).
+ * Wer anfragt (userId, sessionId), kommt nur aus der Antwort des Auth-Service, nie aus Headern oder Body.
+ * Endet die Login-Session (Logout, abgelaufen), schlägt die Prüfung fehl, und damit ist auch der Tresor gesperrt.
  */
 class LoginTokenVerifier(private val auth: AuthServiceClient) {
 
@@ -24,9 +22,7 @@ class LoginTokenVerifier(private val auth: AuthServiceClient) {
         // VORÜBERGEHEND optional, solange die Clients die deviceId noch nicht immer schicken (siehe NO_DEVICE_ID).
         val deviceId = call.request.headers[DEVICE_ID_HEADER]?.also { if (!isValidId(it)) throw Unauthorized() }
 
-        val session = auth.verifySession(token, deviceId) ?: throw Unauthorized()
-        // Prüft der Auth-Service eigentlich schon, aber die Bindung an das Gerät ist zu wichtig, um sich nur darauf zu verlassen.
-        if (deviceId != null && session.deviceId != null && session.deviceId != deviceId) throw Unauthorized()
+        val session = auth.verifySession(token) ?: throw Unauthorized()
 
         return Caller(
             userId = session.userId,
