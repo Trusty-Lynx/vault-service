@@ -4,7 +4,9 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.flywaydb.core.Flyway
 import java.sql.Connection
+import java.sql.SQLException
 import javax.sql.DataSource
 
 class DbConfig(
@@ -25,8 +27,31 @@ fun createDataSource(config: DbConfig): HikariDataSource = HikariDataSource(
         username = config.user
         password = config.password
         maximumPoolSize = config.maximumPoolSize
+        connectionTimeout = 5_000
     },
 )
+
+/**
+ * Legt das Schema an bzw. bringt es auf den neuesten Stand (src/main/resources/db/migration), wie im auth-service.
+ * baselineOnMigrate: Die Server-DB hatte vaults und vault_sessions schon von Hand (ohne Flyway). So eine DB wird
+ * einmalig als V1 markiert, danach laufen nur neuere Migrationen. Eine leere DB bekommt ganz normal V1, V2, …
+ */
+fun migrateDatabase(dataSource: DataSource) {
+    Flyway.configure()
+        .dataSource(dataSource)
+        .baselineOnMigrate(true)
+        .baselineVersion("1")
+        .load()
+        .migrate()
+}
+
+/** Für GET /health: Antwortet die Datenbank? */
+suspend fun DataSource.isReachable(): Boolean =
+    try {
+        withConnection { it.isValid(2) }
+    } catch (_: SQLException) {
+        false
+    }
 
 /** Führt [block] mit einer Connection aus dem Pool auf dem IO-Dispatcher aus. */
 suspend fun <T> DataSource.withConnection(block: (Connection) -> T): T = withContext(Dispatchers.IO) {

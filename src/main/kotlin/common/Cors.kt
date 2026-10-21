@@ -78,6 +78,8 @@ fun Application.configureCors(config: CorsConfig) {
         allowHeader(ITEM_ID_HEADER)
         allowHeader("X-Timestamp")
         allowHeader("X-Device-Sig")
+        allowHeader(HttpHeaders.XRequestId)
+        exposeHeader(HttpHeaders.XRequestId)
         exposeHeader(HttpHeaders.RetryAfter)
     }
 }

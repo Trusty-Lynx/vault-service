@@ -6,31 +6,15 @@ import de.trustylynx.clients.KeyServiceClient
 import de.trustylynx.common.AlreadyExists
 import de.trustylynx.common.Caller
 import de.trustylynx.common.NotFound
-import de.trustylynx.common.SecureRandomBytes
 import de.trustylynx.common.Unauthorized
 import de.trustylynx.common.VaultLocked
+import de.trustylynx.common.secureRandomBytes
 import de.trustylynx.persistence.VaultRepository
 import de.trustylynx.security.VaultToken
 import de.trustylynx.security.VerifierHasher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.Clock
-import java.time.Duration
-
-/** Ergebnis von GET /vault/params. */
-class VaultParams(
-    val saltVault: ByteArray,
-    val kdf: KdfParams,
-)
-
-/** Ergebnis von POST /vault/unlock. */
-class UnlockedVault(
-    val vaultToken: String,
-    val expiresIn: Duration,
-    val wdek: ByteArray,
-) {
-    override fun toString(): String = "UnlockedVault(expiresIn=$expiresIn)"
-}
 
 class VaultService(
     private val repository: VaultRepository,
@@ -47,7 +31,7 @@ class VaultService(
         if (repository.exists(caller.userId)) throw AlreadyExists()
 
         // V3: h vom Key-Service (pepper_vault verlässt ihn nie), dann Argon2id hier.
-        val saltSVault = SecureRandomBytes.next(VerifierHasher.SALT_LENGTH)
+        val saltSVault = secureRandomBytes(VerifierHasher.SALT_LENGTH)
         val vaultVerifier = withPepperHmac(caller.userId, newVault.unlockKey) { h ->
             VerifierHasher.hash(h, saltSVault)
         }

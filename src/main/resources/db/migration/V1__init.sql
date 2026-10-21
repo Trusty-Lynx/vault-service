@@ -1,4 +1,6 @@
--- Schema der vault-db. Einmal von Hand ausführen (z. B. in DataGrip).
+-- Schema der vault-db, Stand vor Flyway. Flyway führt das beim Start aus (common/Database.kt, migrateDatabase).
+-- Auf DBs, die vaults und vault_sessions schon von Hand hatten, wird V1 übersprungen (baselineOnMigrate).
+-- Bereits ausgeführte Migrationen nie ändern, sondern eine neue Datei V<n+1>__… anlegen.
 
 -- Ein Tresor pro Nutzer. user_id kommt aus dem Login-Token (auth-service), deshalb kein Fremdschlüssel.
 CREATE TABLE vaults (
@@ -18,15 +20,4 @@ CREATE TABLE vault_sessions (
     device_id   TEXT        NOT NULL,
     session_id  TEXT        NOT NULL,   -- Login-Session, an die der Tresor-Token gebunden ist
     expires_at  TIMESTAMPTZ NOT NULL    -- 15 min nach der letzten Tresor-Anfrage
-);
-
--- Einträge (Passwörter). Kopf und Geheimnis getrennt, beide mit Schicht 2 (C2). Der Server kann sie nicht lesen.
--- item_id erzeugt der Client (z. B. UUID), sie steht in der AAD beider Teile.
-CREATE TABLE items (
-    user_id    TEXT    NOT NULL REFERENCES vaults(user_id) ON DELETE CASCADE,
-    item_id    TEXT    NOT NULL,
-    rev        INTEGER NOT NULL CHECK (rev >= 1),   -- Revision, steht in der AAD, verhindert stilles Überschreiben
-    head_c2    BYTEA   NOT NULL,                    -- Titel, URL, Benutzername
-    secret_c2  BYTEA   NOT NULL,                    -- Passwort
-    PRIMARY KEY (user_id, item_id)
 );

@@ -6,10 +6,14 @@ import de.trustylynx.clients.HttpCryptoServiceClient
 import de.trustylynx.clients.HttpKeyServiceClient
 import de.trustylynx.common.CorsConfig
 import de.trustylynx.common.configureCors
+import de.trustylynx.common.configureRequestLogging
 import de.trustylynx.common.configureSerialization
 import de.trustylynx.common.configureStatusPages
 import de.trustylynx.common.createDataSource
 import de.trustylynx.common.createServiceHttpClient
+import de.trustylynx.common.healthRoute
+import de.trustylynx.common.isReachable
+import de.trustylynx.common.migrateDatabase
 import de.trustylynx.domain.ItemService
 import de.trustylynx.domain.VaultService
 import de.trustylynx.persistence.PostgresItemRepository
@@ -28,31 +32,39 @@ fun Application.module() {
     val config = AppConfig.fromEnv()
 
     val dataSource = createDataSource(config.db)
-    val http = createServiceHttpClient()
+    migrateDatabase(dataSource)
+    val httpClient = createServiceHttpClient()
     monitor.subscribe(ApplicationStopped) {
-        http.close()
+        httpClient.close()
         dataSource.close()
     }
 
-    val cryptoService = HttpCryptoServiceClient(http, config.cryptoServiceUrl, config.serviceTokenVault)
-    val vaultService = VaultService(
+    val crypto = HttpCryptoServiceClient(httpClient, config.cryptoServiceUrl, config.serviceTokenVault)
+    val vaults = VaultService(
         repository = PostgresVaultRepository(dataSource),
-        keyService = HttpKeyServiceClient(http, config.keyServiceUrl, config.serviceTokenVault),
-        cryptoService = cryptoService,
+        keyService = HttpKeyServiceClient(httpClient, config.keyServiceUrl, config.serviceTokenVault),
+        cryptoService = crypto,
     )
-    val itemService = ItemService(PostgresItemRepository(dataSource), cryptoService)
+    val items = ItemService(PostgresItemRepository(dataSource), crypto)
 
-    configureApp(vaultService, itemService, config.cors)
+    configureApp(vaults, items, config.cors) { dataSource.isReachable() }
 }
 
 /** Plugins und Routen, getrennt von [module], damit Tests Fakes einsetzen können. */
-fun Application.configureApp(vaultService: VaultService, itemService: ItemService, cors: CorsConfig = CorsConfig()) {
-    // Zuerst, damit auch Fehlerantworten (401, 502 …) die CORS-Header tragen, sonst sieht der Browser nur "CORS error".
+fun Application.configureApp(
+    vaults: VaultService,
+    items: ItemService,
+    cors: CorsConfig = CorsConfig(),
+    isHealthy: suspend () -> Boolean = { true },
+) {
+    configureRequestLogging()
+    // Vor allem anderen, damit auch Fehlerantworten (401, 502 …) die CORS-Header tragen, sonst sieht der Browser nur "CORS error".
     configureCors(cors)
     configureSerialization()
     configureStatusPages()
     routing {
-        vaultRoutes(vaultService)
-        itemRoutes(vaultService, itemService)
+        healthRoute(isHealthy)
+        vaultRoutes(vaults)
+        itemRoutes(vaults, items)
     }
 }
