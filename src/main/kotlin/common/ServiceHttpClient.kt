@@ -4,8 +4,10 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.callid.CallId
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.statement.HttpResponse
+import io.ktor.http.HttpHeaders
 import io.ktor.http.URLBuilder
 import io.ktor.http.Url
 import io.ktor.http.appendPathSegments
@@ -27,6 +29,8 @@ fun createServiceHttpClient(): HttpClient = HttpClient(CIO) {
         connectTimeoutMillis = 2_000
         requestTimeoutMillis = 10_000
     }
+    // Reicht die X-Request-Id der laufenden Anfrage an den anderen Service weiter (siehe RequestLogging.kt).
+    install(CallId) { addToHeader(HttpHeaders.XRequestId) }
 }
 
 fun serviceUrl(baseUrl: String, vararg segments: String): Url =

@@ -6,24 +6,15 @@ import de.trustylynx.clients.KeyServiceClient
 import de.trustylynx.common.AlreadyExists
 import de.trustylynx.common.Caller
 import de.trustylynx.common.NotFound
-import de.trustylynx.common.SecureRandomBytes
 import de.trustylynx.common.Unauthorized
+import de.trustylynx.common.VaultLocked
+import de.trustylynx.common.secureRandomBytes
 import de.trustylynx.persistence.VaultRepository
 import de.trustylynx.security.VaultToken
 import de.trustylynx.security.VerifierHasher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.Clock
-import java.time.Duration
-
-/** Ergebnis von POST /vault/unlock. */
-class UnlockedVault(
-    val vaultToken: String,
-    val expiresIn: Duration,
-    val wdek: ByteArray,
-) {
-    override fun toString(): String = "UnlockedVault(expiresIn=$expiresIn)"
-}
 
 class VaultService(
     private val repository: VaultRepository,
@@ -40,7 +31,7 @@ class VaultService(
         if (repository.exists(caller.userId)) throw AlreadyExists()
 
         // V3: h vom Key-Service (pepper_vault verlässt ihn nie), dann Argon2id hier.
-        val saltSVault = SecureRandomBytes.next(VerifierHasher.SALT_LENGTH)
+        val saltSVault = secureRandomBytes(VerifierHasher.SALT_LENGTH)
         val vaultVerifier = withPepperHmac(caller.userId, newVault.unlockKey) { h ->
             VerifierHasher.hash(h, saltSVault)
         }
@@ -65,6 +56,15 @@ class VaultService(
     }
 
     /**
+     * GET /vault/params (U1–U2): Salt und Argon2-Parameter, damit der Client aus dem Masterpasswort den unlockKey ableiten kann.
+     * Kein Tresor → [NotFound]. Kein Seiteneffekt, auch kein Tresor-Token.
+     */
+    suspend fun params(caller: Caller): VaultParams {
+        val vault = repository.find(caller.userId) ?: throw NotFound()
+        return VaultParams(saltVault = vault.saltVault, kdf = vault.kdf)
+    }
+
+    /**
      * POST /vault/unlock (U4–U10): prüft das Masterpasswort (als unlockKey) und gibt den wDEK und einen neuen Tresor-Token heraus.
      * Kein Tresor → [NotFound]. Falsches Masterpasswort → [Unauthorized].
      */
@@ -83,8 +83,34 @@ class VaultService(
 
         val (token, session) = newSession(caller)
         repository.createSession(session)
+        // Gelegenheit zum Aufräumen: Abgelaufene Tokens dieses Nutzers braucht niemand mehr.
+        repository.deleteExpiredSessions(caller.userId, clock.instant())
         return UnlockedVault(vaultToken = token, expiresIn = VaultToken.IDLE_TIMEOUT, wdek = wdek)
     }
+
+    /**
+     * Issue #7: Prüft den Tresor-Token für jeden Endpunkt hinter dem Entsperren und verlängert ihn um 15 min.
+     * Gültig nur, wenn er zu userId, deviceId UND Login-Session des Aufrufers passt und nicht abgelaufen ist.
+     * Endet die Login-Session, passt die sessionId nicht mehr → der Tresor-Token ist damit automatisch ungültig.
+     * Fehlt, falsch, fremd oder abgelaufen → [VaultLocked] (401 vault_locked), ohne nach außen zu sagen, was genau.
+     */
+    suspend fun requireUnlocked(caller: Caller, vaultToken: String?) {
+        val tokenHash = hashIfWellFormed(vaultToken) ?: throw VaultLocked()
+        val now = clock.instant()
+        if (!repository.touchSession(tokenHash, caller, now, now.plus(VaultToken.IDLE_TIMEOUT))) throw VaultLocked()
+    }
+
+    /**
+     * POST /vault/lock: widerruft den Tresor-Token dieses Geräts. Andere Geräte bleiben entsperrt, der Login bleibt.
+     * Schon gesperrt, abgelaufen oder fremd → [VaultLocked]. Laut Doku räumt der Client dann trotzdem lokal auf.
+     */
+    suspend fun lock(caller: Caller, vaultToken: String?) {
+        val tokenHash = hashIfWellFormed(vaultToken) ?: throw VaultLocked()
+        if (!repository.deleteSession(tokenHash, caller, clock.instant())) throw VaultLocked()
+    }
+
+    private fun hashIfWellFormed(vaultToken: String?): ByteArray? =
+        vaultToken?.takeIf(VaultToken::isWellFormed)?.let(VaultToken::hash)
 
     /**
      * Holt h = HMAC(pepper_vault, unlockKey) vom Key-Service und rechnet [block] damit.

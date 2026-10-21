@@ -1,4 +1,6 @@
--- Schema der vault-db. Einmal von Hand ausführen (z. B. in DataGrip).
+-- Schema der vault-db, Stand vor Flyway. Flyway führt das beim Start aus (common/Database.kt, migrateDatabase).
+-- Auf DBs, die vaults und vault_sessions schon von Hand hatten, wird V1 übersprungen (baselineOnMigrate).
+-- Bereits ausgeführte Migrationen nie ändern, sondern eine neue Datei V<n+1>__… anlegen.
 
 -- Ein Tresor pro Nutzer. user_id kommt aus dem Login-Token (auth-service), deshalb kein Fremdschlüssel.
 CREATE TABLE vaults (
