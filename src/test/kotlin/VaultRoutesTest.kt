@@ -4,19 +4,24 @@ import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.CryptoServiceClient
 import de.trustylynx.clients.KeyServiceClient
 import de.trustylynx.common.AlreadyExists
+import de.trustylynx.common.Caller
 import de.trustylynx.common.DEVICE_ID_HEADER
 import de.trustylynx.common.IntegrityError
 import de.trustylynx.common.NO_DEVICE_ID
 import de.trustylynx.common.SESSION_ID_HEADER
 import de.trustylynx.common.USER_ID_HEADER
 import de.trustylynx.common.UpstreamException
+import de.trustylynx.common.VAULT_TOKEN_HEADER
+import de.trustylynx.common.VaultLocked
 import de.trustylynx.domain.KdfParams
 import de.trustylynx.domain.Vault
+import de.trustylynx.domain.ItemService
 import de.trustylynx.domain.VaultService
 import de.trustylynx.domain.VaultSession
 import de.trustylynx.persistence.VaultRepository
 import de.trustylynx.security.VaultToken
 import de.trustylynx.security.VerifierHasher
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -28,6 +33,7 @@ import io.ktor.http.contentType
 import io.ktor.server.config.MapApplicationConfig
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -41,6 +47,7 @@ import java.util.Base64
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -161,6 +168,54 @@ class VaultRoutesTest {
         assertNull(repository.vault)
     }
 
+    // ---------- GET /vault/params ----------
+
+    @Test
+    fun `params liefert Salt und KDF ohne Seiteneffekt`() = vaultTest {
+        repository.vault = storedVault()
+
+        val response = getParams()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(
+            Json.parseToJsonElement(
+                """{"salt":"${b64(SALT_VAULT)}","kdf":{"alg":"argon2id","m":65536,"t":3,"p":1,"len":32}}""",
+            ),
+            response.json(),
+        )
+        // Kein Tresor-Token, keine anderen Services
+        assertTrue(repository.sessions.isEmpty())
+        assertNull(keyService.calledWith)
+        assertNull(cryptoService.calledWith)
+    }
+
+    @Test
+    fun `params ohne Tresor ergibt 404`() = vaultTest {
+        val response = getParams()
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        assertTrue(response.bodyAsText().contains("not_found"))
+    }
+
+    @Test
+    fun `params liefert nicht den Tresor eines anderen Nutzers`() = vaultTest {
+        repository.vault = storedVault()
+
+        val response = client.get("/vault/params") {
+            header(USER_ID_HEADER, "u43")
+            header(SESSION_ID_HEADER, "s-2")
+        }
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+    }
+
+    @Test
+    fun `params ohne Caller-Header ergibt 401`() = vaultTest {
+        repository.vault = storedVault()
+
+        assertEquals(HttpStatusCode.Unauthorized, client.get("/vault/params").status)
+    }
+
     // ---------- POST /vault/unlock ----------
 
     @Test
@@ -246,12 +301,142 @@ class VaultRoutesTest {
         assertTrue(repository.sessions.isEmpty())
     }
 
+    @Test
+    fun `unlock raeumt abgelaufene Tresor-Tokens des Nutzers weg`() = vaultTest {
+        repository.vault = storedVault()
+        repository.sessions += session(VaultToken.generate(), expiresAt = clock.instant().minusSeconds(1))
+        repository.sessions += session(VaultToken.generate(), userId = "u43", expiresAt = clock.instant().minusSeconds(1))
+
+        assertEquals(HttpStatusCode.OK, postUnlock(UNLOCK_KEY).status)
+
+        // Übrig: der neue Token von u42 und der abgelaufene von u43 (fremde Nutzer fasst unlock nicht an).
+        assertEquals(listOf("u42", "u43"), repository.sessions.map { it.userId }.sorted())
+        assertTrue(repository.sessions.single { it.userId == "u42" }.expiresAt.isAfter(clock.instant()))
+    }
+
+    // ---------- Tresor-Token (#7) ----------
+
+    @Test
+    fun `gueltiger Tresor-Token wird akzeptiert und um 15 min verlaengert`() = runBlocking<Unit> {
+        val token = VaultToken.generate()
+        repository.sessions += session(token, expiresAt = clock.instant().plusSeconds(60))
+
+        service().requireUnlocked(CALLER, token)
+
+        assertEquals(clock.instant().plus(Duration.ofMinutes(15)), repository.sessions.single().expiresAt)
+    }
+
+    @Test
+    fun `Tresor-Token fehlt, ist kaputt oder unbekannt ergibt vault_locked`() = runBlocking<Unit> {
+        repository.sessions += session(VaultToken.generate())
+
+        for (token in listOf(null, "", "zu-kurz", "x".repeat(43) + "!", VaultToken.generate())) {
+            assertFailsWith<VaultLocked>("token=$token") { service().requireUnlocked(CALLER, token) }
+        }
+    }
+
+    @Test
+    fun `abgelaufener Tresor-Token ergibt vault_locked und wird nicht verlaengert`() = runBlocking<Unit> {
+        val token = VaultToken.generate()
+        repository.sessions += session(token, expiresAt = clock.instant())
+
+        assertFailsWith<VaultLocked> { service().requireUnlocked(CALLER, token) }
+        assertEquals(clock.instant(), repository.sessions.single().expiresAt)
+    }
+
+    @Test
+    fun `Tresor-Token gilt nur fuer denselben Nutzer, dasselbe Geraet und dieselbe Login-Session`() = runBlocking<Unit> {
+        val token = VaultToken.generate()
+        repository.sessions += session(token)
+
+        for (other in listOf(
+            Caller("u43", "dev-mac-01", "s-1"),
+            Caller("u42", "dev-other", "s-1"),
+            // Login-Session beendet und neu eingeloggt → neue sessionId → alter Tresor-Token ist tot.
+            Caller("u42", "dev-mac-01", "s-2"),
+        )) {
+            assertFailsWith<VaultLocked>("caller=${other.userId}/${other.deviceId}/${other.sessionId}") {
+                service().requireUnlocked(other, token)
+            }
+        }
+    }
+
+    // ---------- POST /vault/lock ----------
+
+    @Test
+    fun `lock widerruft den Tresor-Token, danach ist er ungueltig`() = vaultTest {
+        val token = VaultToken.generate()
+        repository.sessions += session(token)
+
+        val response = postLock(token)
+
+        assertEquals(HttpStatusCode.NoContent, response.status)
+        assertTrue(repository.sessions.isEmpty())
+        assertFailsWith<VaultLocked> { service().requireUnlocked(CALLER, token) }
+    }
+
+    @Test
+    fun `lock zweimal ergibt beim zweiten Mal vault_locked`() = vaultTest {
+        val token = VaultToken.generate()
+        repository.sessions += session(token)
+
+        assertEquals(HttpStatusCode.NoContent, postLock(token).status)
+        val second = postLock(token)
+
+        assertEquals(HttpStatusCode.Unauthorized, second.status)
+        assertTrue(second.bodyAsText().contains("vault_locked"))
+    }
+
+    @Test
+    fun `lock ohne Tresor-Token ergibt vault_locked`() = vaultTest {
+        val response = postLock(null)
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertTrue(response.bodyAsText().contains("vault_locked"))
+    }
+
+    @Test
+    fun `lock betrifft nur den Token dieses Geraets`() = vaultTest {
+        val mine = VaultToken.generate()
+        val otherDevice = VaultToken.generate()
+        repository.sessions += session(mine)
+        repository.sessions += session(otherDevice, deviceId = "dev-phone")
+
+        assertEquals(HttpStatusCode.NoContent, postLock(mine).status)
+
+        assertEquals("dev-phone", repository.sessions.single().deviceId)
+    }
+
+    @Test
+    fun `lock mit dem Token eines anderen Geraets ergibt vault_locked und loescht nichts`() = vaultTest {
+        val otherDevice = VaultToken.generate()
+        repository.sessions += session(otherDevice, deviceId = "dev-phone")
+
+        assertEquals(HttpStatusCode.Unauthorized, postLock(otherDevice).status)
+        assertEquals(1, repository.sessions.size)
+    }
+
     // ---------- Hilfen ----------
+
+    private fun service() = VaultService(repository, keyService, cryptoService, clock)
+
+    private fun session(
+        token: String,
+        userId: String = "u42",
+        deviceId: String = "dev-mac-01",
+        sessionId: String = "s-1",
+        expiresAt: Instant = clock.instant().plus(Duration.ofMinutes(10)),
+    ) = VaultSession(VaultToken.hash(token), userId, deviceId, sessionId, expiresAt)
+
+    private suspend fun ApplicationTestBuilder.postLock(token: String?): HttpResponse = client.post("/vault/lock") {
+        callerHeaders()
+        if (token != null) header(VAULT_TOKEN_HEADER, token)
+    }
 
     private fun vaultTest(block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
         // Leere Config, damit nicht application.yaml geladen wird und module() mit echter DB startet.
         environment { config = MapApplicationConfig() }
-        application { configureApp(VaultService(repository, keyService, cryptoService, clock)) }
+        application { configureApp(VaultService(repository, keyService, cryptoService, clock), ItemService(FakeItemRepository(), cryptoService)) }
         block()
     }
 
@@ -259,6 +444,10 @@ class VaultRoutesTest {
         callerHeaders()
         contentType(ContentType.Application.Json)
         setBody(body)
+    }
+
+    private suspend fun ApplicationTestBuilder.getParams(): HttpResponse = client.get("/vault/params") {
+        callerHeaders()
     }
 
     private suspend fun ApplicationTestBuilder.postUnlock(unlockKey: ByteArray): HttpResponse = client.post("/vault/unlock") {
@@ -288,70 +477,9 @@ class VaultRoutesTest {
         )
     }
 
-    private class FakeVaultRepository : VaultRepository {
-        var failWithConflict = false
-        var vault: Vault? = null
-        val sessions = mutableListOf<VaultSession>()
-
-        override suspend fun exists(userId: String) = vault?.userId == userId
-
-        override suspend fun find(userId: String) = vault?.takeIf { it.userId == userId }
-
-        override suspend fun create(vault: Vault, session: VaultSession) {
-            if (failWithConflict) throw AlreadyExists()
-            this.vault = vault
-            sessions += session
-        }
-
-        override suspend fun createSession(session: VaultSession) {
-            sessions += session
-        }
-    }
-
-    private class FakeKeyService : KeyServiceClient {
-        var fail = false
-        var calledWith: Pair<String, ByteArray>? = null
-
-        override suspend fun pepperHmac(userId: String, unlockKey: ByteArray): ByteArray {
-            calledWith = userId to unlockKey.copyOf()
-            if (fail) throw UpstreamException("key-service down")
-            return h(unlockKey)
-        }
-
-        companion object {
-            // Kein echtes HMAC, aber wie HMAC: anderer unlockKey → anderes h.
-            fun h(unlockKey: ByteArray): ByteArray = ByteArray(32) { (unlockKey[it] + 1).toByte() }
-        }
-    }
-
-    private class FakeCryptoService : CryptoServiceClient {
-        var fail = false
-        var integrityError = false
-        var calledWith: Triple<String, CryptoPart, String?>? = null
-
-        override suspend fun encrypt(userId: String, part: CryptoPart, c1: ByteArray, itemId: String?): ByteArray {
-            calledWith = Triple(userId, part, itemId)
-            if (fail) throw UpstreamException("crypto-service down")
-            return c2Of(c1)
-        }
-
-        override suspend fun decrypt(userId: String, part: CryptoPart, c2: ByteArray, itemId: String?): ByteArray {
-            calledWith = Triple(userId, part, itemId)
-            if (fail) throw UpstreamException("crypto-service down")
-            if (integrityError) throw IntegrityError()
-            return c2.copyOfRange(HEADER.size, c2.size - FILLER)
-        }
-
-        companion object {
-            private val HEADER = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, 0x02, 0x00, 0x01)
-            private const val FILLER = 28
-
-            // Kein echtes ChaCha20, nur erkennbar: TLX2-Header + c1 + 28 Byte Füllung = c1 + 36 Byte
-            fun c2Of(c1: ByteArray): ByteArray = HEADER + c1 + ByteArray(FILLER)
-        }
-    }
-
     private companion object {
+        /** Derselbe Aufrufer wie in callerHeaders(). */
+        val CALLER = Caller(userId = "u42", deviceId = "dev-mac-01", sessionId = "s-1")
         val SALT_VAULT = ByteArray(16) { 1 }
         val UNLOCK_KEY = ByteArray(32) { 2 }
         val WDEK = byteArrayOf(0x01, 0x01) + ByteArray(60) { 3 }

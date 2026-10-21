@@ -1,6 +1,7 @@
 package de.trustylynx.common
 
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.application.log
@@ -10,9 +11,6 @@ import io.ktor.server.plugins.cors.routing.CORS
 
 private val LOCAL_ORIGIN = Regex("""^http://(localhost|127\.0\.0\.1):\d+$""")
 private val ORIGIN = Regex("""^https?://[a-z0-9.-]+(:\d+)?$""")
-
-/** Header, mit dem der Client den Tresor-Token schickt (GET /items usw., kommt mit den Item-Endpunkten). */
-const val VAULT_TOKEN_HEADER = "X-Vault-Token"
 
 data class CorsConfig(
     val allowedOrigins: Set<String> = emptySet(),
@@ -66,6 +64,10 @@ fun Application.configureCors(config: CorsConfig) {
                 // bleibt CORS_ALLOW_NULL_ORIGIN false. Nie zusammen mit allowCredentials oder Cookies verwenden.
                 (config.allowNullOrigin && origin == "null")
         }
+        // Ktor erlaubt standardmäßig nur GET, POST und HEAD. PUT /items und DELETE /items brauchen das hier,
+        // sonst scheitert der Browser schon am Preflight (Bruno/curl merken davon nichts).
+        allowMethod(HttpMethod.Put)
+        allowMethod(HttpMethod.Delete)
         allowHeader(HttpHeaders.ContentType)
         allowHeader(HttpHeaders.Authorization)
         // Platzhalter bis #8: Solange wir den Login-Token nicht selbst prüfen, schickt der Client diese Header mit.
@@ -73,8 +75,11 @@ fun Application.configureCors(config: CorsConfig) {
         allowHeader(SESSION_ID_HEADER)
         allowHeader(DEVICE_ID_HEADER)
         allowHeader(VAULT_TOKEN_HEADER)
+        allowHeader(ITEM_ID_HEADER)
         allowHeader("X-Timestamp")
         allowHeader("X-Device-Sig")
+        allowHeader(HttpHeaders.XRequestId)
+        exposeHeader(HttpHeaders.XRequestId)
         exposeHeader(HttpHeaders.RetryAfter)
     }
 }

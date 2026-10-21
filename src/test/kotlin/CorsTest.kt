@@ -3,8 +3,10 @@ package de.trustylynx
 import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.CryptoServiceClient
 import de.trustylynx.clients.KeyServiceClient
+import de.trustylynx.common.Caller
 import de.trustylynx.common.CorsConfig
 import de.trustylynx.domain.Vault
+import de.trustylynx.domain.ItemService
 import de.trustylynx.domain.VaultService
 import de.trustylynx.domain.VaultSession
 import de.trustylynx.persistence.VaultRepository
@@ -17,6 +19,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.config.MapApplicationConfig
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -48,6 +51,21 @@ class CorsTest {
         val allowed = assertNotNull(response.headers[HttpHeaders.AccessControlAllowHeaders]).lowercase()
         for (h in listOf("content-type", "x-user-id", "x-session-id", "x-device-id", "x-vault-token")) {
             assertTrue(h in allowed, "$h fehlt in $allowed")
+        }
+    }
+
+    @Test
+    fun `Preflight fuer PUT und DELETE auf items wird erlaubt`() = corsTest {
+        for (method in listOf("PUT", "DELETE")) {
+            val response = client.options("/items") {
+                header(HttpHeaders.Origin, "http://localhost:3000")
+                header(HttpHeaders.AccessControlRequestMethod, method)
+                header(HttpHeaders.AccessControlRequestHeaders, "content-type,x-vault-token,x-item-id")
+            }
+
+            assertTrue(response.status.value in 200..299, "$method: status ${response.status}")
+            val allowed = assertNotNull(response.headers[HttpHeaders.AccessControlAllowMethods], method)
+            assertTrue(method in allowed, "$method fehlt in $allowed")
         }
     }
 
@@ -136,7 +154,7 @@ class CorsTest {
 
     private fun corsTest(cors: CorsConfig = CorsConfig(), block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApp(VaultService(UnusedRepository, UnusedKeyService, UnusedCryptoService), cors) }
+        application { configureApp(VaultService(UnusedRepository, UnusedKeyService, UnusedCryptoService), ItemService(FakeItemRepository(), UnusedCryptoService), cors) }
         block()
     }
 
@@ -159,6 +177,9 @@ class CorsTest {
         override suspend fun find(userId: String) = error("unused")
         override suspend fun create(vault: Vault, session: VaultSession) = error("unused")
         override suspend fun createSession(session: VaultSession) = error("unused")
+        override suspend fun touchSession(tokenHash: ByteArray, caller: Caller, now: Instant, newExpiresAt: Instant) = error("unused")
+        override suspend fun deleteSession(tokenHash: ByteArray, caller: Caller, now: Instant) = error("unused")
+        override suspend fun deleteExpiredSessions(userId: String, now: Instant) = error("unused")
     }
 
     private object UnusedKeyService : KeyServiceClient {
