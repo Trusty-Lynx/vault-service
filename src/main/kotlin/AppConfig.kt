@@ -12,9 +12,10 @@ class AppConfig(
     val cryptoServiceUrl: String,
     val authServiceUrl: String,
     val serviceTokenVault: String,
+    val serviceTokenGateway: String,
     val cors: CorsConfig,
 ) {
-    // Ohne Service-Token, damit er nie im Log landet.
+    // Ohne Service-Tokens, damit sie nie im Log landen.
     override fun toString(): String =
         "AppConfig(db=$db, keyServiceUrl=$keyServiceUrl, cryptoServiceUrl=$cryptoServiceUrl, cors=$cors, authServiceUrl=$authServiceUrl)"
         
@@ -31,11 +32,14 @@ class AppConfig(
             keyServiceUrl = envOrDev("KEY_SERVICE_URL", "http://localhost:7492"),
             // Crypto-Service 2 (ChaCha20), Server: https://chacha50poly1305.nexvent.de. Lokal 7494 ist ein Platzhalter.
             cryptoServiceUrl = envOrDev("CRYPTO_SERVICE_URL", "http://localhost:7494"),
-            // Für POST /internal/sessions/verify (#8). Default ist der Container im trustylynx-net, lokal z. B. http://localhost:7491.
-            // Bewusst nicht envOrDev: Solange #8 nicht in den Routen hängt, soll ein fehlender Wert den Start nicht verhindern.
+            // Login-Token prüfen über POST /internal/sessions/verify (#8). Default ist der Container im trustylynx-net,
+            // für lokale Entwicklung AUTH_SERVICE_URL=http://localhost:7491 setzen.
             authServiceUrl = env("AUTH_SERVICE_URL", "http://auth-service:8080"),
-            // Muss im Key-Service als VAULT_SERVICE_TOKEN hinterlegt sein (und im Crypto-Service, und für #8 im Auth-Service).
+            // Muss im Key-Service als VAULT_SERVICE_TOKEN hinterlegt sein (und im Crypto-Service).
             serviceTokenVault = envOrDev("SERVICE_TOKEN_VAULT", "dev-service-token-vault"),
+            // Für den Auth-Service: Er kennt für /internal/sessions/verify nur den Gateway-Token, deshalb nehmen wir denselben.
+            // Muss gleich SERVICE_TOKEN_GATEWAY im Auth-Service sein. Dev-Default = Dev-Default des Auth-Service.
+            serviceTokenGateway = envOrDev("SERVICE_TOKEN_GATEWAY", "dev-service-token-gateway"),
             // Optional: CORS_ALLOWED_ORIGINS (kommagetrennt), CORS_ALLOW_NULL_ORIGIN (nur lokal true). localhost geht immer.
             cors = CorsConfig.fromEnv(),
         )

@@ -3,13 +3,12 @@ package de.trustylynx
 import de.trustylynx.clients.CryptoPart
 import de.trustylynx.common.DEVICE_ID_HEADER
 import de.trustylynx.common.ITEM_ID_HEADER
-import de.trustylynx.common.SESSION_ID_HEADER
-import de.trustylynx.common.USER_ID_HEADER
 import de.trustylynx.common.VAULT_TOKEN_HEADER
 import de.trustylynx.domain.ItemService
 import de.trustylynx.domain.StoredItem
 import de.trustylynx.domain.VaultService
 import de.trustylynx.domain.VaultSession
+import de.trustylynx.security.LoginTokenVerifier
 import de.trustylynx.security.VaultToken
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.delete
@@ -20,6 +19,7 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.server.config.MapApplicationConfig
@@ -374,6 +374,7 @@ class ItemRoutesTest {
             configureApp(
                 VaultService(vaults, keyService, cryptoService, clock),
                 ItemService(itemRepository, cryptoService),
+                LoginTokenVerifier(FakeAuthService()),
             )
         }
         block()
@@ -383,9 +384,8 @@ class ItemRoutesTest {
         VaultSession(VaultToken.hash(token), "u42", "dev-mac-01", "s-1", expiresAt)
 
     private fun HttpRequestBuilder.callerHeaders() {
-        header(USER_ID_HEADER, "u42")
+        header(HttpHeaders.Authorization, "Bearer $LOGIN_TOKEN")
         header(DEVICE_ID_HEADER, "dev-mac-01")
-        header(SESSION_ID_HEADER, "s-1")
     }
 
     private suspend fun ApplicationTestBuilder.putItem(

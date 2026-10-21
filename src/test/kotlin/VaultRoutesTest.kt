@@ -8,8 +8,6 @@ import de.trustylynx.common.Caller
 import de.trustylynx.common.DEVICE_ID_HEADER
 import de.trustylynx.common.IntegrityError
 import de.trustylynx.common.NO_DEVICE_ID
-import de.trustylynx.common.SESSION_ID_HEADER
-import de.trustylynx.common.USER_ID_HEADER
 import de.trustylynx.common.UpstreamException
 import de.trustylynx.common.VAULT_TOKEN_HEADER
 import de.trustylynx.common.VaultLocked
@@ -19,6 +17,7 @@ import de.trustylynx.domain.ItemService
 import de.trustylynx.domain.VaultService
 import de.trustylynx.domain.VaultSession
 import de.trustylynx.persistence.VaultRepository
+import de.trustylynx.security.LoginTokenVerifier
 import de.trustylynx.security.VaultToken
 import de.trustylynx.security.VerifierHasher
 import io.ktor.client.request.get
@@ -28,6 +27,7 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.server.config.MapApplicationConfig
@@ -57,6 +57,7 @@ class VaultRoutesTest {
     private val repository = FakeVaultRepository()
     private val keyService = FakeKeyService()
     private val cryptoService = FakeCryptoService()
+    private val auth = FakeAuthService()
     private val clock = Clock.fixed(Instant.parse("2026-10-19T12:00:00Z"), ZoneOffset.UTC)
 
     // ---------- POST /vault ----------
@@ -129,8 +130,7 @@ class VaultRoutesTest {
     @Test
     fun `POST vault ohne X-Device-Id nimmt vorerst den Platzhalter`() = vaultTest {
         val response = client.post("/vault") {
-            header(USER_ID_HEADER, "u42")
-            header(SESSION_ID_HEADER, "s-1")
+            header(HttpHeaders.Authorization, "Bearer $LOGIN_TOKEN")
             contentType(ContentType.Application.Json)
             setBody(VALID_BODY)
         }
@@ -142,9 +142,8 @@ class VaultRoutesTest {
     @Test
     fun `POST vault mit ungueltiger X-Device-Id ergibt 401`() = vaultTest {
         val response = client.post("/vault") {
-            header(USER_ID_HEADER, "u42")
+            header(HttpHeaders.Authorization, "Bearer $LOGIN_TOKEN")
             header(DEVICE_ID_HEADER, "kaputt|id")
-            header(SESSION_ID_HEADER, "s-1")
             contentType(ContentType.Application.Json)
             setBody(VALID_BODY)
         }
@@ -202,8 +201,7 @@ class VaultRoutesTest {
         repository.vault = storedVault()
 
         val response = client.get("/vault/params") {
-            header(USER_ID_HEADER, "u43")
-            header(SESSION_ID_HEADER, "s-2")
+            header(HttpHeaders.Authorization, "Bearer $LOGIN_TOKEN_U43")
         }
 
         assertEquals(HttpStatusCode.NotFound, response.status)
@@ -416,6 +414,51 @@ class VaultRoutesTest {
         assertEquals(1, repository.sessions.size)
     }
 
+    // ---------- Login-Token (#8) ----------
+
+    @Test
+    fun `die alten Platzhalter-Header X-User-Id und X-Session-Id allein reichen nicht mehr`() = vaultTest {
+        repository.vault = storedVault()
+
+        val response = client.get("/vault/params") {
+            header("X-User-Id", "u42")
+            header("X-Session-Id", "s-1")
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertEquals(0, auth.calls)
+    }
+
+    @Test
+    fun `unbekannter oder abgelaufener Login-Token ergibt 401 unauthorized`() = vaultTest {
+        repository.vault = storedVault()
+
+        val response = client.get("/vault/params") { header(HttpHeaders.Authorization, "Bearer unbekannter-token") }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertTrue(response.bodyAsText().contains("unauthorized"))
+    }
+
+    @Test
+    fun `nach dem Logout ist auch ein noch gueltiger Tresor-Token wertlos`() = vaultTest {
+        val token = VaultToken.generate()
+        repository.sessions += session(token)
+        auth.sessions.remove(LOGIN_TOKEN) // Login-Session beendet
+
+        val response = postLock(token)
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertTrue(response.bodyAsText().contains("unauthorized"))
+        assertEquals(1, repository.sessions.size)
+    }
+
+    @Test
+    fun `Auth-Service nicht erreichbar ergibt 502`() = vaultTest {
+        auth.fail = true
+
+        assertEquals(HttpStatusCode.BadGateway, getParams().status)
+    }
+
     // ---------- Hilfen ----------
 
     private fun service() = VaultService(repository, keyService, cryptoService, clock)
@@ -436,7 +479,7 @@ class VaultRoutesTest {
     private fun vaultTest(block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
         // Leere Config, damit nicht application.yaml geladen wird und module() mit echter DB startet.
         environment { config = MapApplicationConfig() }
-        application { configureApp(VaultService(repository, keyService, cryptoService, clock), ItemService(FakeItemRepository(), cryptoService)) }
+        application { configureApp(VaultService(repository, keyService, cryptoService, clock), ItemService(FakeItemRepository(), cryptoService), LoginTokenVerifier(auth)) }
         block()
     }
 
@@ -457,9 +500,8 @@ class VaultRoutesTest {
     }
 
     private fun io.ktor.client.request.HttpRequestBuilder.callerHeaders() {
-        header(USER_ID_HEADER, "u42")
+        header(HttpHeaders.Authorization, "Bearer $LOGIN_TOKEN")
         header(DEVICE_ID_HEADER, "dev-mac-01")
-        header(SESSION_ID_HEADER, "s-1")
     }
 
     private suspend fun HttpResponse.json(): JsonObject = Json.parseToJsonElement(bodyAsText()).jsonObject
