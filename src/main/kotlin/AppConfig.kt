@@ -13,6 +13,7 @@ class AppConfig(
     val authServiceUrl: String,
     val serviceTokenVault: String,
     val serviceTokenGateway: String,
+    val serviceTokenBreach: String,
     val cors: CorsConfig,
 ) {
     // Ohne Service-Tokens, damit sie nie im Log landen.
@@ -40,6 +41,8 @@ class AppConfig(
             // Für den Auth-Service: Er kennt für /internal/sessions/verify nur den Gateway-Token, deshalb nehmen wir denselben.
             // Muss gleich SERVICE_TOKEN_GATEWAY im Auth-Service sein. Dev-Default = Dev-Default des Auth-Service.
             serviceTokenGateway = envOrDev("SERVICE_TOKEN_GATEWAY", "dev-service-token-gateway"),
+            // Damit ruft der Breach-Service POST /internal/vault/unlocked auf. Muss gleich SERVICE_TOKEN_BREACH im Breach-Service sein.
+            serviceTokenBreach = envOrDev("SERVICE_TOKEN_BREACH", "dev-service-token-breach"),
             // Optional: CORS_ALLOWED_ORIGINS (kommagetrennt), CORS_ALLOW_NULL_ORIGIN (nur lokal true). localhost geht immer.
             cors = CorsConfig.fromEnv(),
         )

@@ -1,5 +1,6 @@
 package de.trustylynx
 
+import de.trustylynx.api.internalRoutes
 import de.trustylynx.api.itemRoutes
 import de.trustylynx.api.vaultRoutes
 import de.trustylynx.clients.HttpAuthServiceClient
@@ -50,7 +51,7 @@ fun Application.module() {
     val items = ItemService(PostgresItemRepository(dataSource), crypto)
     val loginTokens = LoginTokenVerifier(HttpAuthServiceClient(httpClient, config.authServiceUrl, config.serviceTokenGateway))
 
-    configureApp(vaults, items, loginTokens, config.cors) { dataSource.isReachable() }
+    configureApp(vaults, items, loginTokens, config.cors, config.serviceTokenBreach) { dataSource.isReachable() }
 }
 
 /** Plugins und Routen, getrennt von [module], damit Tests Fakes einsetzen können. */
@@ -59,6 +60,8 @@ fun Application.configureApp(
     items: ItemService,
     loginTokens: LoginTokenVerifier,
     cors: CorsConfig = CorsConfig(),
+    // Leer = keine internen Routen. In module() kommt er immer aus SERVICE_TOKEN_BREACH (Pflicht in Prod).
+    breachToken: String = "",
     isHealthy: suspend () -> Boolean = { true },
 ) {
     configureRequestLogging()
@@ -70,5 +73,6 @@ fun Application.configureApp(
         healthRoute(isHealthy)
         vaultRoutes(vaults, loginTokens)
         itemRoutes(vaults, items, loginTokens)
+        if (breachToken.isNotEmpty()) internalRoutes(vaults, breachToken)
     }
 }

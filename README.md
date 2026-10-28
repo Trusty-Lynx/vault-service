@@ -18,8 +18,12 @@ Kotlin 2.4 · Ktor 3.6 · PostgreSQL 17 · Java 21
 | `GET` | `/items/secret` | Passwort eines Eintrags als C1 |
 | `DELETE` | `/items` | Eintrag löschen |
 | `GET` | `/health` | `200`, wenn Service und Datenbank laufen, sonst `503` |
+| `POST` | `/internal/vault/unlocked` | Nur für den Breach-Service: `204`, wenn der Tresor entsperrt ist, sonst `401 vault_locked` |
 
-Jeder Endpoint außer `/health` braucht den Login-Token vom Auth-Service: `Authorization: Bearer <login-token>`.
+`/internal/vault/unlocked` braucht keinen Login-Token, sondern `X-Service-Token` (`SERVICE_TOKEN_BREACH`).
+Body: `{userId, sessionId, deviceId, vaultToken}`. userId und sessionId hat der Breach-Service vorher beim Auth-Service geprüft.
+
+Jeder andere Endpoint außer `/health` braucht den Login-Token vom Auth-Service: `Authorization: Bearer <login-token>`.
 Der Vault-Service prüft ihn bei jeder Anfrage selbst über `POST /internal/sessions/verify` (#8). Wer anfragt, kommt nur von dort.
 Alles außer `/vault`, `/vault/params` und `/vault/unlock` braucht zusätzlich den Tresor-Token im Header `X-Vault-Token`.
 Die `itemId` steht im Header `X-Item-Id`, nicht im Pfad (abweichend von der Doku, Entscheid 2026-10-21).
