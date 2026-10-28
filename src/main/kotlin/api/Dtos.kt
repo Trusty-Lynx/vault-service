@@ -3,6 +3,21 @@ package de.trustylynx.api
 import de.trustylynx.domain.KdfParams
 import kotlinx.serialization.Serializable
 
+/**
+ * POST /internal/vault/unlocked (vom Breach-Service). userId und sessionId hat der Aufrufer vorher beim Auth-Service geprüft,
+ * deviceId ist dieselbe wie beim Entsperren (oder NO_DEVICE_ID).
+ */
+@Serializable
+data class VerifyUnlockedRequest(
+    val userId: String,
+    val sessionId: String,
+    val deviceId: String,
+    val vaultToken: String,
+) {
+    // Ohne Tresor-Token, damit er nie im Log landet.
+    override fun toString() = "VerifyUnlockedRequest(userId=$userId, sessionId=$sessionId, deviceId=$deviceId)"
+}
+
 @Serializable
 data class CreateVaultRequest(
     val salt: String,
