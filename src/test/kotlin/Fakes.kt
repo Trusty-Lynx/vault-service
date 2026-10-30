@@ -1,6 +1,7 @@
 package de.trustylynx
 
 import de.trustylynx.clients.AuthServiceClient
+import de.trustylynx.clients.CryptoAlg
 import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.CryptoServiceClient
 import de.trustylynx.clients.KeyServiceClient
@@ -130,7 +131,8 @@ internal class FakeKeyService : KeyServiceClient {
     }
 }
 
-internal class FakeCryptoService : CryptoServiceClient {
+/** Fake für einen Crypto-Service. [alg] bestimmt das Algorithmus-Byte im C2-Header (wie beim echten Service). */
+internal class FakeCryptoService(private val alg: CryptoAlg = CryptoAlg.CHACHA) : CryptoServiceClient {
     var fail = false
     var integrityError = false
 
@@ -146,21 +148,22 @@ internal class FakeCryptoService : CryptoServiceClient {
     override suspend fun encrypt(userId: String, part: CryptoPart, c1: ByteArray, itemId: String?): ByteArray {
         calls += Triple(userId, part, itemId)
         if (fail) throw UpstreamException("crypto-service down")
-        return c2Of(c1)
+        return c2Of(c1, alg)
     }
 
     override suspend fun decrypt(userId: String, part: CryptoPart, c2: ByteArray, itemId: String?): ByteArray {
         calls += Triple(userId, part, itemId)
         if (fail) throw UpstreamException("crypto-service down")
         if (integrityError) throw IntegrityError()
-        return c2.copyOfRange(HEADER.size, c2.size - FILLER)
+        return c2.copyOfRange(HEADER_SIZE, c2.size - FILLER)
     }
 
     companion object {
-        private val HEADER = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, 0x02, 0x00, 0x01)
+        private const val HEADER_SIZE = 8
         private const val FILLER = 28
 
-        // Kein echtes ChaCha20, nur erkennbar: TLX2-Header + c1 + 28 Byte Füllung = c1 + 36 Byte
-        fun c2Of(c1: ByteArray): ByteArray = HEADER + c1 + ByteArray(FILLER)
+        // Kein echtes ChaCha20/AES, nur erkennbar: TLX2-Header (mit Algorithmus-Byte) + c1 + 28 Byte Füllung = c1 + 36 Byte
+        fun c2Of(c1: ByteArray, alg: CryptoAlg = CryptoAlg.CHACHA): ByteArray =
+            byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, alg.id, 0x00, 0x01) + c1 + ByteArray(FILLER)
     }
 }

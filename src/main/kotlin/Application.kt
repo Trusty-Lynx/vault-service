@@ -3,6 +3,8 @@ package de.trustylynx
 import de.trustylynx.api.internalRoutes
 import de.trustylynx.api.itemRoutes
 import de.trustylynx.api.vaultRoutes
+import de.trustylynx.clients.CryptoAlg
+import de.trustylynx.clients.CryptoServices
 import de.trustylynx.clients.HttpAuthServiceClient
 import de.trustylynx.clients.HttpCryptoServiceClient
 import de.trustylynx.clients.HttpKeyServiceClient
@@ -42,13 +44,15 @@ fun Application.module() {
         dataSource.close()
     }
 
-    val crypto = HttpCryptoServiceClient(httpClient, config.cryptoServiceUrl, config.serviceTokenVault)
+    // wDEK immer über ChaCha, Einträge über den Service, den der Nutzer pro Eintrag wählt.
+    val chacha = HttpCryptoServiceClient(httpClient, config.cryptoServiceUrl, config.serviceTokenVault, CryptoAlg.CHACHA)
+    val aes = HttpCryptoServiceClient(httpClient, config.cryptoAesServiceUrl, config.serviceTokenVault, CryptoAlg.AES)
     val vaults = VaultService(
         repository = PostgresVaultRepository(dataSource),
         keyService = HttpKeyServiceClient(httpClient, config.keyServiceUrl, config.serviceTokenVault),
-        cryptoService = crypto,
+        cryptoService = chacha,
     )
-    val items = ItemService(PostgresItemRepository(dataSource), crypto)
+    val items = ItemService(PostgresItemRepository(dataSource), CryptoServices(aes = aes, chacha = chacha))
     val loginTokens = LoginTokenVerifier(HttpAuthServiceClient(httpClient, config.authServiceUrl, config.serviceTokenGateway))
 
     configureApp(vaults, items, loginTokens, config.cors, config.serviceTokenBreach) { dataSource.isReachable() }
