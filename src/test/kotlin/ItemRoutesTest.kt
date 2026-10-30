@@ -1,6 +1,8 @@
 package de.trustylynx
 
+import de.trustylynx.clients.CryptoAlg
 import de.trustylynx.clients.CryptoPart
+import de.trustylynx.clients.CryptoServices
 import de.trustylynx.common.DEVICE_ID_HEADER
 import de.trustylynx.common.ITEM_ID_HEADER
 import de.trustylynx.common.VAULT_TOKEN_HEADER
@@ -46,6 +48,7 @@ class ItemRoutesTest {
     private val itemRepository = FakeItemRepository()
     private val keyService = FakeKeyService()
     private val cryptoService = FakeCryptoService()
+    private val aesService = FakeCryptoService(CryptoAlg.AES)
     private val clock = Clock.fixed(Instant.parse("2026-10-21T12:00:00Z"), ZoneOffset.UTC)
     private val token = VaultToken.generate()
 
@@ -169,6 +172,110 @@ class ItemRoutesTest {
 
         assertEquals(HttpStatusCode.BadGateway, putItem(rev = 1).status)
         assertTrue(itemRepository.items.isEmpty())
+    }
+
+    // ---------- Zwei Crypto-Services ----------
+
+    @Test
+    fun `ohne alg wird mit ChaCha gespeichert, AES bleibt unberuehrt`() = itemTest {
+        assertEquals(HttpStatusCode.OK, putItem(rev = 1).status)
+
+        assertContentEquals(FakeCryptoService.c2Of(HEAD, CryptoAlg.CHACHA), itemRepository.items.getValue("u42" to ITEM_ID).headC2)
+        assertEquals(2, cryptoService.calls.size)
+        assertTrue(aesService.calls.isEmpty())
+    }
+
+    @Test
+    fun `alg aes speichert beide Teile ueber Crypto-Service 1`() = itemTest {
+        val response = putItem(rev = 1, alg = "aes")
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val stored = itemRepository.items.getValue("u42" to ITEM_ID)
+        assertContentEquals(FakeCryptoService.c2Of(HEAD, CryptoAlg.AES), stored.headC2)
+        assertContentEquals(FakeCryptoService.c2Of(SECRET, CryptoAlg.AES), stored.secretC2)
+        assertEquals(2, aesService.calls.size)
+        assertTrue(cryptoService.calls.isEmpty())
+    }
+
+    @Test
+    fun `Wechsel beim Bearbeiten verschluesselt mit dem anderen Service neu`() = itemTest {
+        itemRepository.items["u42" to ITEM_ID] =
+            StoredItem(ITEM_ID, 1, FakeCryptoService.c2Of(HEAD, CryptoAlg.AES), FakeCryptoService.c2Of(SECRET, CryptoAlg.AES))
+
+        assertEquals(HttpStatusCode.OK, putItem(rev = 2, alg = "chacha").status)
+
+        assertContentEquals(FakeCryptoService.c2Of(SECRET, CryptoAlg.CHACHA), itemRepository.items.getValue("u42" to ITEM_ID).secretC2)
+        assertTrue(aesService.calls.isEmpty())
+    }
+
+    @Test
+    fun `unbekannter alg ergibt 400 ohne Crypto-Service`() = itemTest {
+        assertEquals(HttpStatusCode.BadRequest, putItem(rev = 1, alg = "rot13").status)
+        assertTrue(cryptoService.calls.isEmpty() && aesService.calls.isEmpty())
+        assertTrue(itemRepository.items.isEmpty())
+    }
+
+    @Test
+    fun `AES nicht erreichbar ergibt 502 crypto_unavailable mit reason aes, ChaCha geht weiter`() = itemTest {
+        aesService.fail = true
+
+        val failed = putItem(rev = 1, alg = "aes")
+        assertEquals(HttpStatusCode.BadGateway, failed.status)
+        assertEquals("crypto_unavailable", failed.json("error"))
+        assertEquals("aes", failed.json("reason"))
+        assertTrue(itemRepository.items.isEmpty())
+
+        assertEquals(HttpStatusCode.OK, putItem(rev = 1, alg = "chacha").status)
+    }
+
+    @Test
+    fun `GET items liefert alg pro Eintrag und entschluesselt beim richtigen Service`() = itemTest {
+        itemRepository.items["u42" to "a"] = StoredItem("a", 1, FakeCryptoService.c2Of(HEAD, CryptoAlg.AES), byteArrayOf(9))
+        itemRepository.items["u42" to "b"] = StoredItem("b", 1, FakeCryptoService.c2Of(HEAD, CryptoAlg.CHACHA), byteArrayOf(9))
+
+        val response = getItems()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val list = Json.parseToJsonElement(response.bodyAsText()).jsonObject.getValue("items").jsonArray.map { it.jsonObject }
+        assertEquals(listOf("aes", "chacha"), list.map { it.getValue("alg").jsonPrimitive.content })
+        assertEquals(listOf(b64(HEAD), b64(HEAD)), list.map { it.getValue("head").jsonPrimitive.content })
+        assertEquals(listOf<Triple<String, CryptoPart, String?>>(Triple("u42", CryptoPart.HEAD, "a")), aesService.calls)
+        assertEquals(listOf<Triple<String, CryptoPart, String?>>(Triple("u42", CryptoPart.HEAD, "b")), cryptoService.calls)
+    }
+
+    @Test
+    fun `GET secret eines AES-Eintrags geht an Crypto-Service 1`() = itemTest {
+        itemRepository.items["u42" to ITEM_ID] = StoredItem(ITEM_ID, 1, byteArrayOf(9), FakeCryptoService.c2Of(SECRET, CryptoAlg.AES))
+
+        val response = getSecret()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(b64(SECRET), response.json("data"))
+        assertEquals(1, aesService.calls.size)
+        assertTrue(cryptoService.calls.isEmpty())
+    }
+
+    @Test
+    fun `GET secret mit nicht erreichbarem AES ergibt 502 crypto_unavailable`() = itemTest {
+        itemRepository.items["u42" to ITEM_ID] = StoredItem(ITEM_ID, 1, byteArrayOf(9), FakeCryptoService.c2Of(SECRET, CryptoAlg.AES))
+        aesService.fail = true
+
+        val response = getSecret()
+
+        assertEquals(HttpStatusCode.BadGateway, response.status)
+        assertEquals("aes", response.json("reason"))
+    }
+
+    @Test
+    fun `gespeichertes C2 mit unbekanntem Algorithmus-Byte ergibt 500 integrity_error`() = itemTest {
+        val unknown = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, 0x07, 0x00, 0x01) + SECRET + ByteArray(28)
+        itemRepository.items["u42" to ITEM_ID] = StoredItem(ITEM_ID, 1, byteArrayOf(9), unknown)
+
+        val response = getSecret()
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status)
+        assertTrue(response.bodyAsText().contains("integrity_error"))
+        assertTrue(cryptoService.calls.isEmpty() && aesService.calls.isEmpty())
     }
 
     // ---------- GET /items ----------
@@ -373,7 +480,7 @@ class ItemRoutesTest {
         application {
             configureApp(
                 VaultService(vaults, keyService, cryptoService, clock),
-                ItemService(itemRepository, cryptoService),
+                ItemService(itemRepository, CryptoServices(aes = aesService, chacha = cryptoService)),
                 LoginTokenVerifier(FakeAuthService()),
             )
         }
@@ -394,12 +501,14 @@ class ItemRoutesTest {
         head: ByteArray = HEAD,
         secret: ByteArray = SECRET,
         rawHead: String = b64(head),
+        alg: String? = null,
     ): HttpResponse = client.put("/items") {
         callerHeaders()
         header(VAULT_TOKEN_HEADER, token)
         if (itemId != null) header(ITEM_ID_HEADER, itemId)
         contentType(ContentType.Application.Json)
-        setBody("""{"rev":$rev,"head":"$rawHead","secret":"${b64(secret)}"}""")
+        val algField = if (alg != null) ""","alg":"$alg"""" else ""
+        setBody("""{"rev":$rev,"head":"$rawHead","secret":"${b64(secret)}"$algField}""")
     }
 
     private suspend fun HttpResponse.json(field: String): String =

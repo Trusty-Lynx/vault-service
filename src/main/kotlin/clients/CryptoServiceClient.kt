@@ -27,7 +27,29 @@ enum class CryptoPart(val wire: String) {
     DEK("dek"),
 }
 
-/** Zugriff auf Crypto-Service 2 (Schicht 2, ChaCha20-Poly1305). Als Interface, damit Tests einen Fake einsetzen können. */
+/**
+ * Welcher Crypto-Service Schicht 2 macht. [wire] wie im Key-Service ("aes" / "chacha"),
+ * [id] ist das Algorithmus-Byte im C2-Header (Byte 5): 01 = Crypto-Service 1, 02 = Crypto-Service 2.
+ */
+enum class CryptoAlg(val wire: String, val id: Byte) {
+    AES("aes", 0x01),
+    CHACHA("chacha", 0x02);
+
+    companion object {
+        fun fromWire(wire: String): CryptoAlg? = entries.firstOrNull { it.wire == wire }
+
+        /** Liest das Algorithmus-Byte aus einem gespeicherten C2. Kein TLX2-Paket oder unbekanntes Byte → null. */
+        fun ofC2(c2: ByteArray): CryptoAlg? {
+            if (c2.size < 6 || !c2.copyOfRange(0, 5).contentEquals(TLX2_V2)) return null
+            return entries.firstOrNull { it.id == c2[5] }
+        }
+
+        // "TLX2" ‖ Format-Version 02
+        private val TLX2_V2 = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02)
+    }
+}
+
+/** Zugriff auf einen Crypto-Service (Schicht 2). Als Interface, damit Tests einen Fake einsetzen können. */
 interface CryptoServiceClient {
     /**
      * Legt Schicht 2 um [c1] und liefert C2 ("TLX2", 36 Byte länger als [c1]).
@@ -42,28 +64,35 @@ interface CryptoServiceClient {
     suspend fun decrypt(userId: String, part: CryptoPart, c2: ByteArray, itemId: String? = null): ByteArray
 }
 
+/** HTTP-Client für EINEN Crypto-Service. Beide Services haben dieselben Endpunkte, nur [alg] (und damit der Header) unterscheidet sich. */
 class HttpCryptoServiceClient(
     private val http: HttpClient,
     private val baseUrl: String,
     private val serviceToken: String,
+    private val alg: CryptoAlg = CryptoAlg.CHACHA,
 ) : CryptoServiceClient {
+
+    // "TLX2" ‖ Version 02 ‖ Algorithmus-Byte dieses Service. Danach folgt die Key-Version (2 Byte).
+    private val c2Prefix = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, alg.id)
 
     // POST /internal/encrypt, siehe documentation/api/crypto-service/encrypt.md
     override suspend fun encrypt(userId: String, part: CryptoPart, c1: ByteArray, itemId: String?): ByteArray {
         requireItemIdRule(part, itemId)
+        val what = "crypto-service ${alg.wire} encrypt"
 
-        val body = callUpstream("crypto-service encrypt") {
+        val body = callUpstream(what) {
             http.post(serviceUrl(baseUrl, "internal", "encrypt")) {
                 header(SERVICE_TOKEN_HEADER, serviceToken)
                 contentType(ContentType.Application.Json)
                 setBody(EncryptRequest(userId = userId, itemId = itemId, part = part.wire, c1 = c1.toBase64()))
-            }.bodyOrThrow<EncryptResponse>("crypto-service encrypt")
+            }.bodyOrThrow<EncryptResponse>(what)
         }
-        val c2 = body.c2.decodeBase64OrNull() ?: throw UpstreamException("crypto-service encrypt: invalid Base64")
+        val c2 = body.c2.decodeBase64OrNull() ?: throw UpstreamException("$what: invalid Base64")
 
         // Was wir speichern, muss sich später auch wieder öffnen lassen: Format vor dem Speichern prüfen.
-        if (c2.size != c1.size + C2_OVERHEAD) throw UpstreamException("crypto-service encrypt: expected ${c1.size + C2_OVERHEAD} bytes")
-        if (!c2.copyOfRange(0, C2_PREFIX.size).contentEquals(C2_PREFIX)) throw UpstreamException("crypto-service encrypt: not a TLX2/ChaCha20 package")
+        // Falsches Algorithmus-Byte heißt: Wir würden das Paket später an den falschen Service schicken.
+        if (c2.size != c1.size + C2_OVERHEAD) throw UpstreamException("$what: expected ${c1.size + C2_OVERHEAD} bytes")
+        if (!c2.copyOfRange(0, c2Prefix.size).contentEquals(c2Prefix)) throw UpstreamException("$what: not a TLX2/${alg.wire} package")
         return c2
     }
 
@@ -71,8 +100,9 @@ class HttpCryptoServiceClient(
     // TODO: Teil "s" braucht laut Doku ein Guard-Ticket (ticket, sig). Offen, ob das bei uns wegfällt.
     override suspend fun decrypt(userId: String, part: CryptoPart, c2: ByteArray, itemId: String?): ByteArray {
         requireItemIdRule(part, itemId)
+        val what = "crypto-service ${alg.wire} decrypt"
 
-        val body = callUpstream("crypto-service decrypt") {
+        val body = callUpstream(what) {
             val response = http.post(serviceUrl(baseUrl, "internal", "decrypt")) {
                 header(SERVICE_TOKEN_HEADER, serviceToken)
                 contentType(ContentType.Application.Json)
@@ -82,10 +112,10 @@ class HttpCryptoServiceClient(
             if (response.status == HttpStatusCode.InternalServerError && response.errorCode() == "integrity_error") {
                 throw IntegrityError()
             }
-            response.bodyOrThrow<DecryptResponse>("crypto-service decrypt")
+            response.bodyOrThrow<DecryptResponse>(what)
         }
-        val c1 = body.c1.decodeBase64OrNull() ?: throw UpstreamException("crypto-service decrypt: invalid Base64")
-        if (c1.size != c2.size - C2_OVERHEAD) throw UpstreamException("crypto-service decrypt: expected ${c2.size - C2_OVERHEAD} bytes")
+        val c1 = body.c1.decodeBase64OrNull() ?: throw UpstreamException("$what: invalid Base64")
+        if (c1.size != c2.size - C2_OVERHEAD) throw UpstreamException("$what: expected ${c2.size - C2_OVERHEAD} bytes")
         return c1
     }
 
@@ -104,9 +134,6 @@ class HttpCryptoServiceClient(
     private companion object {
         // 8 Header + 12 Nonce + 16 Tag
         const val C2_OVERHEAD = 36
-
-        // "TLX2" ‖ Version 02 ‖ Algorithmus 02 (ChaCha20-Poly1305, Crypto-Service 2). Danach folgt die Key-Version (2 Byte).
-        val C2_PREFIX = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, 0x02)
     }
 }
 

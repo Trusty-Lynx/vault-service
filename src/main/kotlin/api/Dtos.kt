@@ -55,11 +55,13 @@ data class UnlockVaultResponse(
 
 // Die itemId steht nicht im Body, sondern im Header X-Item-Id (siehe ITEM_ID_HEADER).
 
+/** `alg`: welcher Crypto-Service Schicht 2 macht, `aes` oder `chacha`. Fehlt es → `chacha` (bisheriges Verhalten). */
 @Serializable
 data class PutItemRequest(
     val rev: Int,
     val head: String,
     val secret: String,
+    val alg: String? = null,
 )
 
 @Serializable
@@ -72,12 +74,16 @@ data class ListItemsResponse(
     val items: List<ItemHeadResponse>,
 )
 
-/** Ein Kopf in GET /items. `head` ist C1, der Client öffnet ihn mit aad1 = TL-L1|{userId}|{id}|h|{rev}. */
+/**
+ * Ein Kopf in GET /items. `head` ist C1, der Client öffnet ihn mit aad1 = TL-L1|{userId}|{id}|h|{rev}.
+ * `alg` (`aes` / `chacha`): mit welchem Crypto-Service der Eintrag gespeichert ist.
+ */
 @Serializable
 data class ItemHeadResponse(
     val id: String,
     val rev: Int,
     val head: String,
+    val alg: String,
 )
 
 /** GET /items/secret. `data` ist C1, der Client öffnet es mit aad1 = TL-L1|{userId}|{itemId}|s|{rev}. */

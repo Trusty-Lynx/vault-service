@@ -41,6 +41,12 @@ class IntegrityError : ApiException(HttpStatusCode.InternalServerError, "integri
 /** Ein anderer Service hat nicht oder unbrauchbar geantwortet. Wird zu 502. */
 class UpstreamException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
+/**
+ * Ein Crypto-Service ([alg] = "aes" / "chacha") ist nicht erreichbar oder antwortet unbrauchbar.
+ * Wird zu `502 { "error": "crypto_unavailable", "reason": "<alg>" }`, damit der Client den anderen Dienst vorschlagen kann.
+ */
+class CryptoUnavailable(val alg: String, cause: UpstreamException) : RuntimeException(cause.message, cause)
+
 /** `409 { "error": "rev_conflict", "currentRev": 2 }` laut put-item.md. */
 @Serializable
 data class RevConflictResponse(

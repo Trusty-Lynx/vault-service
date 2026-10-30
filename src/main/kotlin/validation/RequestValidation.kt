@@ -4,6 +4,7 @@ import de.trustylynx.api.CreateVaultRequest
 import de.trustylynx.api.PutItemRequest
 import de.trustylynx.api.UnlockVaultRequest
 import de.trustylynx.api.VerifyUnlockedRequest
+import de.trustylynx.clients.CryptoAlg
 import de.trustylynx.common.BadRequest
 import de.trustylynx.common.Caller
 import de.trustylynx.common.isValidId
@@ -34,10 +35,11 @@ fun CreateVaultRequest.validate(caller: Caller): NewVault = NewVault(
 /** POST /vault/unlock → der unlockKey (32 Byte). */
 fun UnlockVaultRequest.validate(): ByteArray = validateUnlockKey(unlockKey)
 
-/** PUT /items. Die [itemId] kommt aus dem Header X-Item-Id. */
+/** PUT /items. Die [itemId] kommt aus dem Header X-Item-Id. Ohne `alg` → ChaCha, damit ältere Clients weiter speichern können. */
 fun PutItemRequest.validate(itemId: String): NewItem = NewItem(
     itemId = itemId,
     rev = validateRev(rev),
     head = validateC1(head, "head"),
     secret = validateC1(secret, "secret"),
+    alg = alg?.let { CryptoAlg.fromWire(it) ?: throw BadRequest("unknown alg") } ?: CryptoAlg.CHACHA,
 )
