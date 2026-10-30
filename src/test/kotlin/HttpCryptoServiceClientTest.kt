@@ -1,5 +1,6 @@
 package de.trustylynx
 
+import de.trustylynx.clients.CryptoAlg
 import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.HttpCryptoServiceClient
 import de.trustylynx.common.IntegrityError
@@ -67,6 +68,16 @@ class HttpCryptoServiceClientTest {
     }
 
     @Test
+    fun `AES-Client nimmt nur TLX2-AES-Header an`() = runBlocking<Unit> {
+        val aes = TLX2_AES + WDEK + ByteArray(28)
+        val aesClient = clientRespondingWith(CryptoAlg.AES) { respondJson("""{"c2":"${b64(aes)}"}""") }
+        val wrongClient = clientRespondingWith(CryptoAlg.AES) { respondJson("""{"c2":"${b64(TLX2_CHACHA + WDEK + ByteArray(28))}"}""") }
+
+        assertContentEquals(aes, aesClient.encrypt("u42", CryptoPart.DEK, WDEK))
+        assertFailsWith<UpstreamException> { wrongClient.encrypt("u42", CryptoPart.DEK, WDEK) }
+    }
+
+    @Test
     fun `Fehlerstatus vom Crypto-Service wird zu UpstreamException`() = runBlocking<Unit> {
         val client = clientRespondingWith { respondJson("""{"error":"forbidden"}""", HttpStatusCode.Forbidden) }
 
@@ -124,12 +135,12 @@ class HttpCryptoServiceClientTest {
         assertFailsWith<UpstreamException> { client.decrypt("u42", CryptoPart.DEK, TLX2_CHACHA + WDEK + ByteArray(28)) }
     }
 
-    private fun clientRespondingWith(handler: MockRequestHandler): HttpCryptoServiceClient {
+    private fun clientRespondingWith(alg: CryptoAlg = CryptoAlg.CHACHA, handler: MockRequestHandler): HttpCryptoServiceClient {
         val http = HttpClient(MockEngine(handler)) {
             expectSuccess = false
             install(ContentNegotiation) { json(ServiceJson) }
         }
-        return HttpCryptoServiceClient(http, "http://crypto-1", SERVICE_TOKEN)
+        return HttpCryptoServiceClient(http, "http://crypto-1", SERVICE_TOKEN, alg)
     }
 
     private fun MockRequestHandleScope.respondJson(json: String, status: HttpStatusCode = HttpStatusCode.OK) =
@@ -138,6 +149,7 @@ class HttpCryptoServiceClientTest {
     private companion object {
         const val SERVICE_TOKEN = "test-service-token-vault"
         val TLX2_CHACHA = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, 0x02, 0x00, 0x01)
+        val TLX2_AES = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, 0x01, 0x00, 0x01)
         val WDEK = byteArrayOf(0x01, 0x01) + ByteArray(60) { 3 }
 
         fun b64(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)

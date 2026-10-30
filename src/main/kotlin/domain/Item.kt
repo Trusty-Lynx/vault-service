@@ -1,13 +1,19 @@
 package de.trustylynx.domain
 
-/** Bereits geprüfte Daten für PUT /items: Kopf und Geheimnis als C1 (Schicht 1, vom Client verschlüsselt). */
+import de.trustylynx.clients.CryptoAlg
+
+/**
+ * Bereits geprüfte Daten für PUT /items: Kopf und Geheimnis als C1 (Schicht 1, vom Client verschlüsselt).
+ * [alg]: welcher Crypto-Service Schicht 2 um beide Teile legt (vom Nutzer gewählt).
+ */
 class NewItem(
     val itemId: String,
     val rev: Int,
     val head: ByteArray,
     val secret: ByteArray,
+    val alg: CryptoAlg,
 ) {
-    override fun toString(): String = "NewItem(itemId=$itemId, rev=$rev)"
+    override fun toString(): String = "NewItem(itemId=$itemId, rev=$rev, alg=${alg.wire})"
 }
 
 /** Ein Eintrag, so wie er in `items` steht: beide Teile mit Schicht 2 (C2). */
@@ -29,13 +35,14 @@ class StoredHead(
     override fun toString(): String = "StoredHead(itemId=$itemId, rev=$rev)"
 }
 
-/** Kopf eines Eintrags ohne Schicht 2, also C1. Öffnen kann ihn nur der Client mit dem DEK. */
+/** Kopf eines Eintrags ohne Schicht 2, also C1. Öffnen kann ihn nur der Client mit dem DEK. [alg] aus dem C2-Header. */
 class ItemHead(
     val itemId: String,
     val rev: Int,
     val head: ByteArray,
+    val alg: CryptoAlg,
 ) {
-    override fun toString(): String = "ItemHead(itemId=$itemId, rev=$rev)"
+    override fun toString(): String = "ItemHead(itemId=$itemId, rev=$rev, alg=${alg.wire})"
 }
 
 /** Geheimnis eines Eintrags aus `items`, noch mit Schicht 2 (für GET /items/secret). */

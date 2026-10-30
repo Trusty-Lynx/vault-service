@@ -33,6 +33,10 @@ fun Application.configureStatusPages() {
         exception<BadRequestException> { call, _ ->
             call.respond(HttpStatusCode.BadRequest, ErrorResponse("bad_request", "malformed request body"))
         }
+        exception<CryptoUnavailable> { call, cause ->
+            call.application.log.error("Crypto service ${cause.alg} unavailable on ${call.request.httpMethod.value} ${call.request.path()}", cause)
+            call.respond(HttpStatusCode.BadGateway, ErrorResponse("crypto_unavailable", cause.alg))
+        }
         exception<UpstreamException> { call, cause ->
             call.application.log.error("Upstream error on ${call.request.httpMethod.value} ${call.request.path()}", cause)
             call.respond(HttpStatusCode.BadGateway, ErrorResponse("upstream_error"))

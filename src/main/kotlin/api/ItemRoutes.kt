@@ -22,7 +22,7 @@ fun Route.itemRoutes(vaultService: VaultService, itemService: ItemService, login
     get("/items") {
         val caller = call.unlockedCaller(vaultService, loginTokens)
         val heads = itemService.listHeads(caller)
-        call.respond(ListItemsResponse(heads.map { ItemHeadResponse(id = it.itemId, rev = it.rev, head = it.head.toBase64()) }))
+        call.respond(ListItemsResponse(heads.map { ItemHeadResponse(id = it.itemId, rev = it.rev, head = it.head.toBase64(), alg = it.alg.wire) }))
     }
 
     // Nur auf Klick (Anzeigen, Kopieren, Ausfüllen) und immer nur für einen Eintrag.

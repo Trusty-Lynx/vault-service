@@ -58,6 +58,12 @@ Andere Services, die hier aufgerufen werden:
 | Key-Service | `POST /internal/pepper-hmac` | `h = HMAC(pepper_vault, unlockKey)` für den Tresor-Verifier |
 | Crypto-Service 2 (ChaCha20) | `POST /internal/encrypt` | Schicht 2 um wDEK, Kopf und Geheimnis |
 | Crypto-Service 2 (ChaCha20) | `POST /internal/decrypt` | Schicht 2 abnehmen |
+| Crypto-Service 1 (AES-256-GCM) | `POST /internal/encrypt`, `POST /internal/decrypt` | wie Crypto 2, nur für Einträge mit `alg: "aes"` |
+
+Welcher Crypto-Service einen Eintrag verschlüsselt, wählt der Nutzer pro Eintrag: `PUT /items` mit `alg` = `aes` oder `chacha`
+(fehlt es → `chacha`). Beim Entschlüsseln entscheidet das Algorithmus-Byte im C2-Header (`01` AES, `02` ChaCha), eine eigene
+DB-Spalte gibt es nicht. `GET /items` liefert `alg` pro Eintrag mit. Der wDEK läuft immer über ChaCha.
+Ist ein Crypto-Service nicht erreichbar → `502 { "error": "crypto_unavailable", "reason": "aes" | "chacha" }`.
 
 ## Lokal starten
 
