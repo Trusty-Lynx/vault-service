@@ -1,0 +1,97 @@
+# GraphQL-Schnittstelle des Vault-Service (#36). Gleiche Funktionen wie die REST-Routen, gleiche Header:
+# Authorization: Bearer <login-token> immer, X-Vault-Token für alles hinter dem Entsperren, X-Device-Id vorerst optional.
+# Die itemId ist hier ein Argument statt Header X-Item-Id. Feldnamen wie in api/Dtos.kt.
+# Felder auf oberster Ebene sind absichtlich nullable: Scheitert eines, ist nur es null (Fehler in errors), die anderen kommen trotzdem.
+
+type Query {
+    "GET /vault/params: Salt und Argon2-Parameter. Nur Login-Token."
+    vaultParams: VaultParams
+
+    "GET /items: Köpfe aller Einträge als C1, ohne Passwörter. Braucht X-Vault-Token."
+    items: [ItemHead!]
+
+    "GET /items/secret: Geheimnis eines Eintrags als C1. Braucht X-Vault-Token."
+    itemSecret(itemId: ID!): ItemSecret
+}
+
+type Mutation {
+    "POST /vault: Tresor einmalig anlegen, liefert den ersten Tresor-Token."
+    createVault(input: CreateVaultInput!): CreateVaultPayload
+
+    "POST /vault/unlock: Masterpasswort (als unlockKey) prüfen, liefert wDEK und Tresor-Token."
+    unlockVault(unlockKey: String!): UnlockVaultPayload
+
+    "POST /vault/lock: Tresor-Token dieses Geräts widerrufen. Braucht X-Vault-Token."
+    lockVault: Boolean
+
+    "PUT /items: Eintrag anlegen (rev 1) oder ändern (rev + 1). Braucht X-Vault-Token."
+    putItem(itemId: ID!, input: PutItemInput!): PutItemPayload
+
+    "DELETE /items: Eintrag löschen. Braucht X-Vault-Token."
+    deleteItem(itemId: ID!): Boolean
+}
+
+type KdfParams {
+    alg: String!
+    m: Int!
+    t: Int!
+    p: Int!
+    len: Int!
+}
+
+input KdfParamsInput {
+    alg: String!
+    m: Int!
+    t: Int!
+    p: Int!
+    len: Int!
+}
+
+type VaultParams {
+    "salt_vault, 16 Byte, Base64."
+    salt: String!
+    kdf: KdfParams!
+}
+
+input CreateVaultInput {
+    salt: String!
+    kdf: KdfParamsInput!
+    unlockKey: String!
+    wdek: String!
+}
+
+type CreateVaultPayload {
+    vaultToken: String!
+}
+
+type UnlockVaultPayload {
+    vaultToken: String!
+    "Sekunden ohne Tresor-Anfrage bis zur serverseitigen Sperre."
+    expiresIn: Int!
+    wdek: String!
+}
+
+type ItemHead {
+    id: ID!
+    rev: Int!
+    head: String!
+    "aes oder chacha"
+    alg: String!
+}
+
+type ItemSecret {
+    data: String!
+    rev: Int!
+}
+
+input PutItemInput {
+    rev: Int!
+    head: String!
+    secret: String!
+    "aes oder chacha, fehlt es → chacha"
+    alg: String
+}
+
+type PutItemPayload {
+    rev: Int!
+}

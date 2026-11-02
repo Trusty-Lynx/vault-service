@@ -5,6 +5,7 @@ hikaricp = "7.1.0"
 bouncycastle = "1.86"
 postgresql = "42.7.13"
 flyway = "13.10.0"
+graphql-java = "26.1"
 
 [libraries]
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
@@ -13,6 +14,7 @@ bouncycastle-prov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = 
 postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
 flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
 flyway-postgresql = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
+graphql-java = { module = "com.graphql-java:graphql-java", version.ref = "graphql-java" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

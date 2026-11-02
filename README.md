@@ -17,6 +17,7 @@ Kotlin 2.4 · Ktor 3.6 · PostgreSQL 17 · Java 21
 | `PUT` | `/items` | Eintrag anlegen (`rev` 1) oder ändern (`rev` + 1) |
 | `GET` | `/items/secret` | Passwort eines Eintrags als C1 |
 | `DELETE` | `/items` | Eintrag löschen |
+| `POST` | `/graphql` | Alles oben (außer `/health` und `/internal/*`) noch einmal als GraphQL, siehe unten |
 | `GET` | `/health` | `200`, wenn Service und Datenbank laufen, sonst `503` |
 | `POST` | `/internal/vault/unlocked` | Nur für den Breach-Service: `204`, wenn der Tresor entsperrt ist, sonst `401 vault_locked` |
 
@@ -29,6 +30,30 @@ Alles außer `/vault`, `/vault/params` und `/vault/unlock` braucht zusätzlich d
 Die `itemId` steht im Header `X-Item-Id`, nicht im Pfad (abweichend von der Doku, Entscheid 2026-10-21).
 `X-Device-Id` ist vorerst optional.
 Felder, Fehler und Abläufe: [documentation/api/vault-service](https://github.com/Trusty-Lynx/documentation/tree/main/api/vault-service).
+
+### GraphQL (#36)
+
+`POST /graphql` mit `{ "query": "...", "variables": {...} }`. Schema: `src/main/resources/graphql/schema.graphqls`.
+Gleiche Funktionen und Header wie REST, nur die `itemId` ist ein Argument statt `X-Item-Id`:
+
+| GraphQL | REST |
+|---|---|
+| `query { vaultParams }` | `GET /vault/params` |
+| `query { items }` | `GET /items` |
+| `query { itemSecret(itemId) }` | `GET /items/secret` |
+| `mutation { createVault(input) }` | `POST /vault` |
+| `mutation { unlockVault(unlockKey) }` | `POST /vault/unlock` |
+| `mutation { lockVault }` | `POST /vault/lock` |
+| `mutation { putItem(itemId, input) }` | `PUT /items` |
+| `mutation { deleteItem(itemId) }` | `DELETE /items` |
+
+Ohne gültigen Login-Token gibt es wie bei REST `401`. Alle anderen Fehler kommen mit `200` in `errors`, mit demselben Code
+wie bei REST in `extensions.code` (dazu `extensions.status` = HTTP-Status, den REST geschickt hätte, bei `rev_conflict` auch `currentRev`).
+
+```bash
+curl -X POST localhost:8080/graphql -H "Authorization: Bearer $LOGIN" -H "X-Vault-Token: $VAULT" \
+  -H "Content-Type: application/json" -d '{"query":"{ items { id rev alg } }"}'
+```
 
 ## Struktur
 

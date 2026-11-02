@@ -36,6 +36,8 @@ dependencies {
     implementation(libs.flyway.core)
     implementation(libs.flyway.postgresql)
 
+    implementation(libs.graphql.java)
+
     implementation(libs.bouncycastle.prov)
     implementation(libs.logback.classic)
 

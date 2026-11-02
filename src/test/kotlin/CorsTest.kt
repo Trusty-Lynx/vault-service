@@ -2,6 +2,7 @@ package de.trustylynx
 
 import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.CryptoServiceClient
+import de.trustylynx.clients.CryptoServices
 import de.trustylynx.clients.KeyServiceClient
 import de.trustylynx.common.Caller
 import de.trustylynx.common.CorsConfig
@@ -164,7 +165,7 @@ class CorsTest {
 
     private fun corsTest(cors: CorsConfig = CorsConfig(), block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApp(VaultService(UnusedRepository, UnusedKeyService, UnusedCryptoService), ItemService(FakeItemRepository(), UnusedCryptoService), LoginTokenVerifier(FakeAuthService()), cors) }
+        application { configureApp(VaultService(UnusedRepository, UnusedKeyService, UnusedCryptoService), ItemService(FakeItemRepository(), CryptoServices(aes = UnusedCryptoService, chacha = UnusedCryptoService)), LoginTokenVerifier(FakeAuthService()), cors) }
         block()
     }
 
