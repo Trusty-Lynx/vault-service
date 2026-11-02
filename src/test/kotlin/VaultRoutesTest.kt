@@ -2,6 +2,7 @@ package de.trustylynx
 
 import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.CryptoServiceClient
+import de.trustylynx.clients.CryptoServices
 import de.trustylynx.clients.KeyServiceClient
 import de.trustylynx.common.AlreadyExists
 import de.trustylynx.common.Caller
@@ -479,7 +480,7 @@ class VaultRoutesTest {
     private fun vaultTest(block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
         // Leere Config, damit nicht application.yaml geladen wird und module() mit echter DB startet.
         environment { config = MapApplicationConfig() }
-        application { configureApp(VaultService(repository, keyService, cryptoService, clock), ItemService(FakeItemRepository(), cryptoService), LoginTokenVerifier(auth)) }
+        application { configureApp(VaultService(repository, keyService, cryptoService, clock), ItemService(FakeItemRepository(), CryptoServices(aes = cryptoService, chacha = cryptoService)), LoginTokenVerifier(auth)) }
         block()
     }
 

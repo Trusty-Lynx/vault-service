@@ -1,5 +1,6 @@
 package de.trustylynx
 
+import de.trustylynx.api.graphQlRoutes
 import de.trustylynx.api.internalRoutes
 import de.trustylynx.api.itemRoutes
 import de.trustylynx.api.vaultRoutes
@@ -77,6 +78,7 @@ fun Application.configureApp(
         healthRoute(isHealthy)
         vaultRoutes(vaults, loginTokens)
         itemRoutes(vaults, items, loginTokens)
+        graphQlRoutes(vaults, items, loginTokens)
         if (breachToken.isNotEmpty()) internalRoutes(vaults, breachToken)
     }
 }
