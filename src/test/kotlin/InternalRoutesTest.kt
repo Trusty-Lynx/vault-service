@@ -1,5 +1,6 @@
 package de.trustylynx
 
+import de.trustylynx.clients.CryptoServices
 import de.trustylynx.common.SERVICE_TOKEN_HEADER
 import de.trustylynx.domain.ItemService
 import de.trustylynx.domain.VaultService
@@ -80,7 +81,7 @@ class InternalRoutesTest {
     @Test
     fun `ohne Breach-Token gibt es die Route nicht`() = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApp(service(), ItemService(FakeItemRepository(), FakeCryptoService()), LoginTokenVerifier(FakeAuthService())) }
+        application { configureApp(service(), ItemService(FakeItemRepository(), CryptoServices(aes = FakeCryptoService(), chacha = FakeCryptoService())), LoginTokenVerifier(FakeAuthService())) }
 
         assertEquals(HttpStatusCode.NotFound, client.post(PATH).status)
     }
@@ -105,7 +106,7 @@ class InternalRoutesTest {
         application {
             configureApp(
                 service(),
-                ItemService(FakeItemRepository(), FakeCryptoService()),
+                ItemService(FakeItemRepository(), CryptoServices(aes = FakeCryptoService(), chacha = FakeCryptoService())),
                 LoginTokenVerifier(FakeAuthService()),
                 breachToken = BREACH_TOKEN,
             )
