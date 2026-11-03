@@ -3,15 +3,15 @@ package de.trustylynx
 import de.trustylynx.clients.CryptoAlg
 import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.CryptoServices
-import de.trustylynx.common.DEVICE_ID_HEADER
-import de.trustylynx.common.ITEM_ID_HEADER
-import de.trustylynx.common.VAULT_TOKEN_HEADER
-import de.trustylynx.domain.ItemService
-import de.trustylynx.domain.StoredItem
-import de.trustylynx.domain.VaultService
-import de.trustylynx.domain.VaultSession
+import de.trustylynx.models.DEVICE_ID_HEADER
+import de.trustylynx.models.ITEM_ID_HEADER
+import de.trustylynx.models.StoredItem
+import de.trustylynx.models.VAULT_TOKEN_HEADER
+import de.trustylynx.models.VaultSession
 import de.trustylynx.security.LoginTokenVerifier
 import de.trustylynx.security.VaultToken
+import de.trustylynx.services.ItemService
+import de.trustylynx.services.VaultService
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
@@ -52,8 +52,6 @@ class ItemRoutesTest {
     private val clock = Clock.fixed(Instant.parse("2026-10-21T12:00:00Z"), ZoneOffset.UTC)
     private val token = VaultToken.generate()
 
-    // ---------- PUT /items ----------
-
     @Test
     fun `neuer Eintrag mit rev 1 wird mit Schicht 2 gespeichert`() = itemTest {
         val response = putItem(rev = 1)
@@ -65,7 +63,7 @@ class ItemRoutesTest {
         assertEquals(1, stored.rev)
         assertContentEquals(FakeCryptoService.c2Of(HEAD), stored.headC2)
         assertContentEquals(FakeCryptoService.c2Of(SECRET), stored.secretC2)
-        // Beide Teile einzeln, mit itemId, damit der Crypto-Service sie in die AAD nimmt.
+        // both parts separately and with itemId, so the crypto service puts it into the AAD
         assertEquals(
             listOf<Triple<String, CryptoPart, String?>>(Triple("u42", CryptoPart.HEAD, ITEM_ID), Triple("u42", CryptoPart.SECRET, ITEM_ID)),
             cryptoService.calls,
@@ -109,7 +107,7 @@ class ItemRoutesTest {
 
     @Test
     fun `Wettlauf zweier Geraete ergibt 409 mit der rev des Gewinners`() = itemTest {
-        // Vorab-Prüfung sagt "frei", aber beim Speichern war ein anderes Gerät mit rev 1 schneller.
+        // the early check says "free", but another device saved rev 1 first
         itemRepository.loseRaceWithRev = 1
 
         val response = putItem(rev = 1)
@@ -122,7 +120,7 @@ class ItemRoutesTest {
     fun `ohne Tresor-Token ergibt 401 vault_locked, noch vor jeder anderen Pruefung`() = itemTest {
         val response = client.put("/items") {
             callerHeaders()
-            // absichtlich auch ohne X-Item-Id und mit kaputtem Body
+            // on purpose without X-Item-Id and with a broken body
             contentType(ContentType.Application.Json)
             setBody("{")
         }
@@ -157,7 +155,7 @@ class ItemRoutesTest {
     @Test
     fun `ungueltige Inhalte ergeben 400`() = itemTest {
         val notC1 = byteArrayOf(0x02, 0x01) + ByteArray(60)
-        val wrongPadding = byteArrayOf(0x01, 0x01) + ByteArray(48 + 28) // Block 48 ist keine Zweierpotenz
+        val wrongPadding = byteArrayOf(0x01, 0x01) + ByteArray(48 + 28) // a 48 byte block is not a power of two
 
         assertEquals(HttpStatusCode.BadRequest, putItem(rev = 0).status)
         assertEquals(HttpStatusCode.BadRequest, putItem(rev = 1, head = notC1).status)
@@ -173,8 +171,6 @@ class ItemRoutesTest {
         assertEquals(HttpStatusCode.BadGateway, putItem(rev = 1).status)
         assertTrue(itemRepository.items.isEmpty())
     }
-
-    // ---------- Zwei Crypto-Services ----------
 
     @Test
     fun `ohne alg wird mit ChaCha gespeichert, AES bleibt unberuehrt`() = itemTest {
@@ -278,8 +274,6 @@ class ItemRoutesTest {
         assertTrue(cryptoService.calls.isEmpty() && aesService.calls.isEmpty())
     }
 
-    // ---------- GET /items ----------
-
     @Test
     fun `neuer Tresor liefert leere Liste`() = itemTest {
         val response = getItems()
@@ -304,7 +298,7 @@ class ItemRoutesTest {
         assertEquals(listOf(1, 2), list.map { it.getValue("rev").jsonPrimitive.int })
         assertEquals(listOf(b64(HEAD), b64(headB)), list.map { it.getValue("head").jsonPrimitive.content })
         assertTrue(list.all { "secret" !in it })
-        // Nur Teil h, je mit itemId. Nie s.
+        // only part h, each with itemId. Never s
         assertEquals(
             setOf<Triple<String, CryptoPart, String?>>(Triple("u42", CryptoPart.HEAD, "a"), Triple("u42", CryptoPart.HEAD, "b")),
             cryptoService.calls.toSet(),
@@ -340,8 +334,6 @@ class ItemRoutesTest {
 
         assertEquals(HttpStatusCode.BadGateway, getItems().status)
     }
-
-    // ---------- GET /items/secret ----------
 
     @Test
     fun `liefert das Geheimnis als C1 mit rev`() = itemTest {
@@ -398,14 +390,12 @@ class ItemRoutesTest {
 
     @Test
     fun `Crypto-Service lehnt ab oder ist nicht erreichbar ergibt 502`() = itemTest {
-        // So sieht es auch aus, solange der ChaCha-Service für Teil s noch ein Guard-Ticket verlangt (403 → 502).
+        // also what it looks like while the ChaCha service still wants a guard ticket for part s (403 becomes 502)
         itemRepository.items["u42" to ITEM_ID] = StoredItem(ITEM_ID, 1, byteArrayOf(9), FakeCryptoService.c2Of(SECRET))
         cryptoService.fail = true
 
         assertEquals(HttpStatusCode.BadGateway, getSecret().status)
     }
-
-    // ---------- DELETE /items ----------
 
     @Test
     fun `loescht den Eintrag mit 204`() = itemTest {
@@ -454,8 +444,6 @@ class ItemRoutesTest {
         assertEquals(HttpStatusCode.BadRequest, deleteItem(itemId = null).status)
         assertEquals(HttpStatusCode.BadRequest, deleteItem(itemId = "a|b").status)
     }
-
-    // ---------- Hilfen ----------
 
     private suspend fun ApplicationTestBuilder.deleteItem(itemId: String? = ITEM_ID): HttpResponse = client.delete("/items") {
         callerHeaders()
@@ -520,7 +508,7 @@ class ItemRoutesTest {
     private companion object {
         const val ITEM_ID = "3f2a9c1e-7b4d-4e2a-9c1e-0a1b2c3d4e5f"
 
-        // Kopf: 128 Byte Padding-Block + 30 = 158 Byte, Geheimnis: 32 + 30 = 62 Byte (wie in der Doku)
+        // head: 128 byte padding block + 30 = 158 bytes, secret: 32 + 30 = 62 bytes (like in the docs)
         val HEAD = byteArrayOf(0x01, 0x01) + ByteArray(156) { 5 }
         val SECRET = byteArrayOf(0x01, 0x01) + ByteArray(60) { 6 }
 

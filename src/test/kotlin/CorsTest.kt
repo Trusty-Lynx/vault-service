@@ -4,14 +4,14 @@ import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.CryptoServiceClient
 import de.trustylynx.clients.CryptoServices
 import de.trustylynx.clients.KeyServiceClient
-import de.trustylynx.common.Caller
-import de.trustylynx.common.CorsConfig
-import de.trustylynx.domain.Vault
-import de.trustylynx.domain.ItemService
-import de.trustylynx.domain.VaultService
-import de.trustylynx.domain.VaultSession
-import de.trustylynx.persistence.VaultRepository
+import de.trustylynx.models.Caller
+import de.trustylynx.models.Vault
+import de.trustylynx.models.VaultSession
+import de.trustylynx.plugins.CorsConfig
+import de.trustylynx.repositories.VaultRepository
 import de.trustylynx.security.LoginTokenVerifier
+import de.trustylynx.services.ItemService
+import de.trustylynx.services.VaultService
 import io.ktor.client.request.header
 import io.ktor.client.request.options
 import io.ktor.client.request.post
@@ -33,7 +33,7 @@ import kotlin.test.assertTrue
 private const val LIVE_SERVER = "http://127.0.0.1:5500"
 private const val APP_ORIGIN = "https://app.nexvent.de"
 
-/** Nach dem CorsTest im auth-service. POST /vault ohne Caller-Header gibt 401, das reicht für CORS. */
+// POST /vault without a login token gives 401, that's enough to test CORS
 class CorsTest {
 
     @Test
@@ -73,7 +73,7 @@ class CorsTest {
 
     @Test
     fun `Preflight mit den alten Platzhalter-Headern der Website wird vorerst noch erlaubt`() = corsTest {
-        // So schickt dashboard.js es heute: Authorization plus die alten X-User-Id / X-Session-Id.
+        // what dashboard.js sends today: Authorization plus the old X-User-Id / X-Session-Id
         val response = preflight("http://127.0.0.1:5500", "authorization,content-type,x-user-id,x-session-id,x-vault-token,x-item-id")
 
         assertTrue(response.status.value in 200..299, "status ${response.status}")
@@ -182,7 +182,7 @@ class CorsTest {
 
     private fun HttpResponse.allowOrigin(): String? = headers[HttpHeaders.AccessControlAllowOrigin]
 
-    // Die Requests scheitern schon an caller() (401), der Service wird nie erreicht.
+    // the requests already fail with 401 at the login token, the services are never reached
     private object UnusedRepository : VaultRepository {
         override suspend fun exists(userId: String) = error("unused")
         override suspend fun find(userId: String) = error("unused")

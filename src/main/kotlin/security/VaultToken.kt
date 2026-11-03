@@ -1,27 +1,25 @@
 package de.trustylynx.security
 
-import de.trustylynx.common.secureRandomBytes
-import de.trustylynx.common.sha256
 import java.time.Duration
 import java.util.Base64
 
-/** Tresor-Token: 32 Zufallsbytes, Base64url. In der DB steht nur SHA-256 davon. */
+// 32 random bytes as Base64url, the DB only stores the SHA-256 of it
 object VaultToken {
     const val LENGTH = 32
 
-    /** Leerlaufzeit: Nach 15 min ohne Tresor-Anfrage ist der Token abgelaufen. */
+    // the token expires after 15 minutes without a vault request
     val IDLE_TIMEOUT: Duration = Duration.ofMinutes(15)
 
-    // 32 Byte als Base64url ohne Padding = genau 43 Zeichen.
+    // 32 bytes as Base64url without padding = exactly 43 characters
     private val FORMAT = Regex("^[A-Za-z0-9_-]{43}$")
 
     fun generate(): String =
         Base64.getUrlEncoder().withoutPadding().encodeToString(secureRandomBytes(LENGTH))
 
-    /** Sieht aus wie ein von uns ausgestellter Token? Alles andere gar nicht erst in der DB suchen. */
+    // anything that doesn't look like one of our tokens isn't even looked up in the DB
     fun isWellFormed(token: String): Boolean = FORMAT.matches(token)
 
-    // SHA-256 statt Argon2 reicht: 32 Zufallsbytes kann niemand erraten, da muss nichts gebremst werden.
+    // SHA-256 instead of Argon2 is enough: nobody can guess 32 random bytes, so there's nothing to slow down
     fun hash(token: String): ByteArray =
         sha256(token.toByteArray(Charsets.US_ASCII))
 }

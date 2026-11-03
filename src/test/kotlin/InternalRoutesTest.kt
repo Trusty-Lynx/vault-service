@@ -1,12 +1,12 @@
 package de.trustylynx
 
 import de.trustylynx.clients.CryptoServices
-import de.trustylynx.common.SERVICE_TOKEN_HEADER
-import de.trustylynx.domain.ItemService
-import de.trustylynx.domain.VaultService
-import de.trustylynx.domain.VaultSession
+import de.trustylynx.models.SERVICE_TOKEN_HEADER
+import de.trustylynx.models.VaultSession
 import de.trustylynx.security.LoginTokenVerifier
 import de.trustylynx.security.VaultToken
+import de.trustylynx.services.ItemService
+import de.trustylynx.services.VaultService
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -26,7 +26,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-// POST /internal/vault/unlocked, Aufrufer ist der Breach-Service (Konten-Leak-Check nur bei entsperrtem Tresor).
+// the breach service calls this, it only checks for leaks while the vault is unlocked
 class InternalRoutesTest {
 
     private val repository = FakeVaultRepository()
@@ -86,8 +86,6 @@ class InternalRoutesTest {
         assertEquals(HttpStatusCode.NotFound, client.post(PATH).status)
     }
 
-    // ---------- Hilfen ----------
-
     private fun service() = VaultService(repository, FakeKeyService(), FakeCryptoService(), clock)
 
     private fun session(expiresAt: Instant = clock.instant().plus(Duration.ofMinutes(10))) =
@@ -101,7 +99,7 @@ class InternalRoutesTest {
     ) = """{"userId":"$userId","sessionId":"$sessionId","deviceId":"$deviceId","vaultToken":"$token"}"""
 
     private fun internalTest(block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
-        // Leere Config, damit nicht application.yaml geladen wird und module() mit echter DB startet.
+        // empty config, otherwise application.yaml gets loaded and module() starts with a real DB
         environment { config = MapApplicationConfig() }
         application {
             configureApp(

@@ -1,12 +1,9 @@
 package de.trustylynx.clients
 
-import de.trustylynx.common.SERVICE_TOKEN_HEADER
-import de.trustylynx.common.UpstreamException
-import de.trustylynx.common.bodyOrThrow
-import de.trustylynx.common.callUpstream
-import de.trustylynx.common.decodeBase64OrNull
-import de.trustylynx.common.serviceUrl
-import de.trustylynx.common.toBase64
+import de.trustylynx.models.SERVICE_TOKEN_HEADER
+import de.trustylynx.models.UpstreamException
+import de.trustylynx.security.decodeBase64OrNull
+import de.trustylynx.security.toBase64
 import io.ktor.client.HttpClient
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -15,12 +12,10 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import kotlinx.serialization.Serializable
 
-/** Zugriff auf den Key-Service. Als Interface, damit Tests einen Fake einsetzen können. */
+private const val HMAC_LENGTH = 32
+
 interface KeyServiceClient {
-    /**
-     * V3 Schritt ①: h = HMAC-SHA256(pepper_vault, unlockKey), 32 Byte.
-     * pepper_vault verlässt den Key-Service nie, der Vault-Service bekommt nur h.
-     */
+    // h = HMAC-SHA256(pepper_vault, unlockKey). pepper_vault never leaves the key service, we only get h
     suspend fun pepperHmac(userId: String, unlockKey: ByteArray): ByteArray
 }
 
@@ -30,7 +25,6 @@ class HttpKeyServiceClient(
     private val serviceToken: String,
 ) : KeyServiceClient {
 
-    // POST /internal/pepper-hmac, siehe documentation/api/key-service/pepper-hmac.md
     override suspend fun pepperHmac(userId: String, unlockKey: ByteArray): ByteArray {
         val body = callUpstream("key-service pepper-hmac") {
             http.post(serviceUrl(baseUrl, "internal", "pepper-hmac")) {
@@ -42,10 +36,6 @@ class HttpKeyServiceClient(
         val h = body.h.decodeBase64OrNull() ?: throw UpstreamException("key-service pepper-hmac: invalid Base64")
         if (h.size != HMAC_LENGTH) throw UpstreamException("key-service pepper-hmac: expected $HMAC_LENGTH bytes")
         return h
-    }
-
-    private companion object {
-        const val HMAC_LENGTH = 32
     }
 }
 

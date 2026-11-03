@@ -6,21 +6,21 @@ import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.CryptoServiceClient
 import de.trustylynx.clients.KeyServiceClient
 import de.trustylynx.clients.VerifiedSession
-import de.trustylynx.common.AlreadyExists
-import de.trustylynx.common.Caller
-import de.trustylynx.common.IntegrityError
-import de.trustylynx.common.UpstreamException
-import de.trustylynx.domain.StoredHead
-import de.trustylynx.domain.StoredItem
-import de.trustylynx.domain.StoredSecret
-import de.trustylynx.domain.Vault
-import de.trustylynx.domain.VaultSession
-import de.trustylynx.persistence.ItemRepository
-import de.trustylynx.persistence.VaultRepository
+import de.trustylynx.models.AlreadyExists
+import de.trustylynx.models.Caller
+import de.trustylynx.models.IntegrityError
+import de.trustylynx.models.StoredHead
+import de.trustylynx.models.StoredItem
+import de.trustylynx.models.StoredSecret
+import de.trustylynx.models.UpstreamException
+import de.trustylynx.models.Vault
+import de.trustylynx.models.VaultSession
+import de.trustylynx.repositories.ItemRepository
+import de.trustylynx.repositories.VaultRepository
 import java.time.Instant
 import java.util.Collections
 
-// Gemeinsame Fakes für VaultRoutesTest und ItemRoutesTest. Verhalten wie die Postgres-Repositories, nur im Speicher.
+// in-memory fakes that behave like the Postgres repositories
 
 internal class FakeVaultRepository : VaultRepository {
     var failWithConflict = false
@@ -41,7 +41,7 @@ internal class FakeVaultRepository : VaultRepository {
         sessions += session
     }
 
-    // Gleiche Bedingung wie im SQL von PostgresVaultRepository.
+    // same condition as the SQL in PostgresVaultRepository
     private fun VaultSession.matches(tokenHash: ByteArray, caller: Caller, now: Instant) =
         this.tokenHash.contentEquals(tokenHash) && userId == caller.userId && deviceId == caller.deviceId &&
             sessionId == caller.sessionId && expiresAt.isAfter(now)
@@ -63,10 +63,10 @@ internal class FakeVaultRepository : VaultRepository {
 }
 
 internal class FakeItemRepository : ItemRepository {
-    /** Schlüssel: userId to itemId. */
+    // key: userId to itemId
     val items = mutableMapOf<Pair<String, String>, StoredItem>()
 
-    /** Simuliert einen parallelen Request, der zwischen Vorab-Prüfung und Speichern gewinnt. */
+    // simulates a parallel request that wins between the early check and saving
     var loseRaceWithRev: Int? = null
 
     override suspend fun currentRev(userId: String, itemId: String): Int? = items[userId to itemId]?.rev
@@ -96,7 +96,7 @@ internal class FakeItemRepository : ItemRepository {
     private fun StoredItem.copyWithRev(rev: Int) = StoredItem(itemId, rev, headC2, secretC2)
 }
 
-/** Login-Token von u42 (Session s-1) und u43 (Session s-2), wie sie der Auth-Service bei /login ausgeben würde. */
+// login tokens of u42 (session s-1) and u43 (session s-2)
 internal const val LOGIN_TOKEN = "login-token-u42"
 internal const val LOGIN_TOKEN_U43 = "login-token-u43"
 
@@ -126,23 +126,21 @@ internal class FakeKeyService : KeyServiceClient {
     }
 
     companion object {
-        // Kein echtes HMAC, aber wie HMAC: anderer unlockKey → anderes h.
+        // not a real HMAC, but like one: different unlockKey, different h
         fun h(unlockKey: ByteArray): ByteArray = ByteArray(32) { (unlockKey[it] + 1).toByte() }
     }
 }
 
-/** Fake für einen Crypto-Service. [alg] bestimmt das Algorithmus-Byte im C2-Header (wie beim echten Service). */
+// alg sets the algorithm byte in the C2 header, like the real service
 internal class FakeCryptoService(private val alg: CryptoAlg = CryptoAlg.CHACHA) : CryptoServiceClient {
     var fail = false
     var integrityError = false
 
-    /**
-     * Alle Aufrufe: userId, part, itemId. Synchronisiert, weil GET /items die Köpfe parallel entschlüsselt
-     * (eine normale Liste verliert dabei gelegentlich Einträge).
-     */
+    // userId, part, itemId of every call. Synchronized because GET /items decrypts the heads in parallel
+    // and a normal list sometimes loses entries
     val calls: MutableList<Triple<String, CryptoPart, String?>> = Collections.synchronizedList(mutableListOf())
 
-    /** Der letzte Aufruf (reicht für Tresor-Endpunkte, die nur einmal aufrufen). */
+    // enough for vault endpoints that only call once
     val calledWith: Triple<String, CryptoPart, String?>? get() = calls.lastOrNull()
 
     override suspend fun encrypt(userId: String, part: CryptoPart, c1: ByteArray, itemId: String?): ByteArray {
@@ -162,7 +160,7 @@ internal class FakeCryptoService(private val alg: CryptoAlg = CryptoAlg.CHACHA) 
         private const val HEADER_SIZE = 8
         private const val FILLER = 28
 
-        // Kein echtes ChaCha20/AES, nur erkennbar: TLX2-Header (mit Algorithmus-Byte) + c1 + 28 Byte Füllung = c1 + 36 Byte
+        // not real ChaCha20/AES, just recognizable: TLX2 header (with algorithm byte) + c1 + 28 bytes filler = c1 + 36 bytes
         fun c2Of(c1: ByteArray, alg: CryptoAlg = CryptoAlg.CHACHA): ByteArray =
             byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, alg.id, 0x00, 0x01) + c1 + ByteArray(FILLER)
     }

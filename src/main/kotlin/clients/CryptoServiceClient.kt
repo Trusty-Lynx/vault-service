@@ -1,13 +1,10 @@
 package de.trustylynx.clients
 
-import de.trustylynx.common.IntegrityError
-import de.trustylynx.common.SERVICE_TOKEN_HEADER
-import de.trustylynx.common.UpstreamException
-import de.trustylynx.common.bodyOrThrow
-import de.trustylynx.common.callUpstream
-import de.trustylynx.common.decodeBase64OrNull
-import de.trustylynx.common.serviceUrl
-import de.trustylynx.common.toBase64
+import de.trustylynx.models.IntegrityError
+import de.trustylynx.models.SERVICE_TOKEN_HEADER
+import de.trustylynx.models.UpstreamException
+import de.trustylynx.security.decodeBase64OrNull
+import de.trustylynx.security.toBase64
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.header
@@ -20,17 +17,17 @@ import io.ktor.http.contentType
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 
-/** Welcher Teil verschlüsselt wird. Geht beim Crypto-Service in die AAD ein. */
+// 8 header + 12 nonce + 16 tag
+private const val C2_OVERHEAD = 36
+
+// part of the AAD in the crypto service
 enum class CryptoPart(val wire: String) {
     HEAD("h"),
     SECRET("s"),
     DEK("dek"),
 }
 
-/**
- * Welcher Crypto-Service Schicht 2 macht. [wire] wie im Key-Service ("aes" / "chacha"),
- * [id] ist das Algorithmus-Byte im C2-Header (Byte 5): 01 = Crypto-Service 1, 02 = Crypto-Service 2.
- */
+// id is the algorithm byte in the C2 header (byte 5): 01 = AES service, 02 = ChaCha service
 enum class CryptoAlg(val wire: String, val id: Byte) {
     AES("aes", 0x01),
     CHACHA("chacha", 0x02);
@@ -38,44 +35,35 @@ enum class CryptoAlg(val wire: String, val id: Byte) {
     companion object {
         fun fromWire(wire: String): CryptoAlg? = entries.firstOrNull { it.wire == wire }
 
-        /** Liest das Algorithmus-Byte aus einem gespeicherten C2. Kein TLX2-Paket oder unbekanntes Byte → null. */
+        // null if it's not a TLX2 package or the algorithm byte is unknown
         fun ofC2(c2: ByteArray): CryptoAlg? {
             if (c2.size < 6 || !c2.copyOfRange(0, 5).contentEquals(TLX2_V2)) return null
             return entries.firstOrNull { it.id == c2[5] }
         }
 
-        // "TLX2" ‖ Format-Version 02
+        // "TLX2" + format version 02
         private val TLX2_V2 = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02)
     }
 }
 
-/** Zugriff auf einen Crypto-Service (Schicht 2). Als Interface, damit Tests einen Fake einsetzen können. */
+// itemId is required for HEAD and SECRET and must be null for DEK
 interface CryptoServiceClient {
-    /**
-     * Legt Schicht 2 um [c1] und liefert C2 ("TLX2", 36 Byte länger als [c1]).
-     * [itemId] ist Pflicht bei [CryptoPart.HEAD] und [CryptoPart.SECRET] und fehlt bei [CryptoPart.DEK].
-     */
     suspend fun encrypt(userId: String, part: CryptoPart, c1: ByteArray, itemId: String? = null): ByteArray
 
-    /**
-     * Nimmt Schicht 2 von [c2] ab und liefert C1 (bei [CryptoPart.DEK] den wDEK).
-     * Falscher Tag → [de.trustylynx.common.IntegrityError]. Regeln für [itemId] wie bei [encrypt].
-     */
     suspend fun decrypt(userId: String, part: CryptoPart, c2: ByteArray, itemId: String? = null): ByteArray
 }
 
-/** HTTP-Client für EINEN Crypto-Service. Beide Services haben dieselben Endpunkte, nur [alg] (und damit der Header) unterscheidet sich. */
+// both crypto services have the same endpoints, only alg (and so the C2 header) differs
 class HttpCryptoServiceClient(
     private val http: HttpClient,
     private val baseUrl: String,
     private val serviceToken: String,
-    private val alg: CryptoAlg = CryptoAlg.CHACHA,
+    private val alg: CryptoAlg,
 ) : CryptoServiceClient {
 
-    // "TLX2" ‖ Version 02 ‖ Algorithmus-Byte dieses Service. Danach folgt die Key-Version (2 Byte).
+    // "TLX2" + version 02 + algorithm byte of this service, the key version (2 bytes) comes after
     private val c2Prefix = byteArrayOf(0x54, 0x4c, 0x58, 0x32, 0x02, alg.id)
 
-    // POST /internal/encrypt, siehe documentation/api/crypto-service/encrypt.md
     override suspend fun encrypt(userId: String, part: CryptoPart, c1: ByteArray, itemId: String?): ByteArray {
         requireItemIdRule(part, itemId)
         val what = "crypto-service ${alg.wire} encrypt"
@@ -89,15 +77,14 @@ class HttpCryptoServiceClient(
         }
         val c2 = body.c2.decodeBase64OrNull() ?: throw UpstreamException("$what: invalid Base64")
 
-        // Was wir speichern, muss sich später auch wieder öffnen lassen: Format vor dem Speichern prüfen.
-        // Falsches Algorithmus-Byte heißt: Wir würden das Paket später an den falschen Service schicken.
+        // check the format before we store it, we have to be able to open it later.
+        // A wrong algorithm byte would send the package to the wrong service on decrypt
         if (c2.size != c1.size + C2_OVERHEAD) throw UpstreamException("$what: expected ${c1.size + C2_OVERHEAD} bytes")
         if (!c2.copyOfRange(0, c2Prefix.size).contentEquals(c2Prefix)) throw UpstreamException("$what: not a TLX2/${alg.wire} package")
         return c2
     }
 
-    // POST /internal/decrypt, siehe documentation/api/crypto-service/decrypt.md
-    // TODO: Teil "s" braucht laut Doku ein Guard-Ticket (ticket, sig). Offen, ob das bei uns wegfällt.
+    // TODO: the docs still want a guard ticket (ticket, sig) for part "s", not clear yet if that goes away for us
     override suspend fun decrypt(userId: String, part: CryptoPart, c2: ByteArray, itemId: String?): ByteArray {
         requireItemIdRule(part, itemId)
         val what = "crypto-service ${alg.wire} decrypt"
@@ -108,7 +95,7 @@ class HttpCryptoServiceClient(
                 contentType(ContentType.Application.Json)
                 setBody(DecryptRequest(userId = userId, itemId = itemId, part = part.wire, c2 = c2.toBase64()))
             }
-            // Falscher Tag ist kein Ausfall, sondern Manipulationsverdacht → nicht als 502 verstecken.
+            // a wrong tag means possible tampering, not an outage, so don't hide it behind a 502
             if (response.status == HttpStatusCode.InternalServerError && response.errorCode() == "integrity_error") {
                 throw IntegrityError()
             }
@@ -122,18 +109,13 @@ class HttpCryptoServiceClient(
     private fun requireItemIdRule(part: CryptoPart, itemId: String?) =
         require((part == CryptoPart.DEK) == (itemId == null)) { "itemId is required for h/s and forbidden for dek" }
 
-    /** Fehlercode aus `{ "error": "…" }`, oder null, wenn der Body keiner ist. */
+    // null if the body isn't { "error": "..." }
     private suspend fun HttpResponse.errorCode(): String? = try {
         body<UpstreamError>().error
     } catch (e: CancellationException) {
         throw e
     } catch (_: Exception) {
         null
-    }
-
-    private companion object {
-        // 8 Header + 12 Nonce + 16 Tag
-        const val C2_OVERHEAD = 36
     }
 }
 

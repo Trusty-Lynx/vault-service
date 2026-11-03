@@ -2,17 +2,17 @@ package de.trustylynx
 
 import de.trustylynx.clients.CryptoAlg
 import de.trustylynx.clients.CryptoServices
-import de.trustylynx.common.DEVICE_ID_HEADER
-import de.trustylynx.common.VAULT_TOKEN_HEADER
-import de.trustylynx.domain.ItemService
-import de.trustylynx.domain.KdfParams
-import de.trustylynx.domain.StoredItem
-import de.trustylynx.domain.Vault
-import de.trustylynx.domain.VaultService
-import de.trustylynx.domain.VaultSession
+import de.trustylynx.models.DEVICE_ID_HEADER
+import de.trustylynx.models.KdfParams
+import de.trustylynx.models.StoredItem
+import de.trustylynx.models.VAULT_TOKEN_HEADER
+import de.trustylynx.models.Vault
+import de.trustylynx.models.VaultSession
 import de.trustylynx.security.LoginTokenVerifier
 import de.trustylynx.security.VaultToken
 import de.trustylynx.security.VerifierHasher
+import de.trustylynx.services.ItemService
+import de.trustylynx.services.VaultService
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -47,8 +47,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-// POST /graphql (#36). Gleiche Fakes wie VaultRoutesTest und ItemRoutesTest, geprüft wird vor allem:
-// gleiche Funktionen wie REST, gleiche Fehlercodes (in errors[].extensions), gleiche Reihenfolge der Prüfungen.
+// Mostly checks that GraphQL does the same as REST: same functions, same error codes
+// (in errors[].extensions) and the same order of checks
 class GraphQlRoutesTest {
 
     private val vaults = FakeVaultRepository()
@@ -59,8 +59,6 @@ class GraphQlRoutesTest {
     private val auth = FakeAuthService()
     private val clock = Clock.fixed(Instant.parse("2026-11-02T12:00:00Z"), ZoneOffset.UTC)
     private val token = VaultToken.generate()
-
-    // ---------- Login-Token ----------
 
     @Test
     fun `ohne Login-Token gibt es wie bei REST direkt 401, die Abfrage laeuft nicht`() = graphQlTest {
@@ -83,8 +81,6 @@ class GraphQlRoutesTest {
         assertEquals(HttpStatusCode.OK, response.status)
         assertEquals(1, auth.calls)
     }
-
-    // ---------- Tresor ----------
 
     @Test
     fun `createVault legt den Tresor an und liefert den Tresor-Token`() = graphQlTest {
@@ -166,8 +162,6 @@ class GraphQlRoutesTest {
 
         assertEquals("vault_locked", graphQl("mutation { lockVault }").errorCode())
     }
-
-    // ---------- Einträge ----------
 
     @Test
     fun `items und itemSecret in einer Abfrage`() = graphQlTest {
@@ -261,8 +255,6 @@ class GraphQlRoutesTest {
         assertTrue(response.json().getValue("errors").jsonArray.isNotEmpty())
     }
 
-    // ---------- Hilfen ----------
-
     private fun graphQlTest(block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
         environment { config = MapApplicationConfig() }
         vaults.sessions += VaultSession(VaultToken.hash(token), "u42", "dev-mac-01", "s-1", clock.instant().plus(Duration.ofMinutes(10)))
@@ -297,7 +289,7 @@ class GraphQlRoutesTest {
         itemRepository.items["u42" to ITEM_ID] = StoredItem(ITEM_ID, 1, FakeCryptoService.c2Of(HEAD), FakeCryptoService.c2Of(SECRET))
     }
 
-    /** Ein Tresor, wie createVault ihn mit UNLOCK_KEY und WDEK angelegt hätte. */
+    // a vault like createVault would have created it with UNLOCK_KEY and WDEK
     private fun storedVault(): Vault {
         val saltSVault = ByteArray(16) { 4 }
         return Vault(
@@ -328,7 +320,7 @@ class GraphQlRoutesTest {
         val UNLOCK_KEY = ByteArray(32) { 2 }
         val WDEK = byteArrayOf(0x01, 0x01) + ByteArray(60) { 3 }
 
-        // Kopf: 128 Byte Padding-Block + 30 = 158 Byte, Geheimnis: 32 + 30 = 62 Byte (wie in ItemRoutesTest)
+        // head: 128 byte padding block + 30 = 158 bytes, secret: 32 + 30 = 62 bytes (like in ItemRoutesTest)
         val HEAD = byteArrayOf(0x01, 0x01) + ByteArray(156) { 5 }
         val SECRET = byteArrayOf(0x01, 0x01) + ByteArray(60) { 6 }
 
