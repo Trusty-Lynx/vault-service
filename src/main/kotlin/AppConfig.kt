@@ -13,6 +13,7 @@ class AppConfig(
     val cryptoAesServiceUrl: String,
     val authServiceUrl: String,
     val serviceTokenVault: String,
+    val serviceTokenAes: String,
     val serviceTokenGateway: String,
     val serviceTokenBreach: String,
     val cors: CorsConfig,
@@ -43,8 +44,10 @@ class AppConfig(
             // Login-Token prüfen über POST /internal/sessions/verify (#8). Default ist der Container im trustylynx-net,
             // für lokale Entwicklung AUTH_SERVICE_URL=http://localhost:7491 setzen.
             authServiceUrl = env("AUTH_SERVICE_URL", "http://auth-service:8080"),
-            // Muss im Key-Service als VAULT_SERVICE_TOKEN hinterlegt sein (und in beiden Crypto-Services).
+            // Muss im Key-Service und im ChaCha-Service als VAULT_SERVICE_TOKEN hinterlegt sein.
             serviceTokenVault = envOrDev("SERVICE_TOKEN_VAULT", "dev-service-token-vault"),
+            // Eigener Token für Crypto-Service 1 (AES). Muss gleich AES_SERVICE_TOKEN im AES-Service sein.
+            serviceTokenAes = envOrDev("SERVICE_TOKEN_AES", "dev-service-token-aes"),
             // Für den Auth-Service: Er kennt für /internal/sessions/verify nur den Gateway-Token, deshalb nehmen wir denselben.
             // Muss gleich SERVICE_TOKEN_GATEWAY im Auth-Service sein. Dev-Default = Dev-Default des Auth-Service.
             serviceTokenGateway = envOrDev("SERVICE_TOKEN_GATEWAY", "dev-service-token-gateway"),
