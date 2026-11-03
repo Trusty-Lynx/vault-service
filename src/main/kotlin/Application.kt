@@ -47,7 +47,7 @@ fun Application.module() {
 
     // wDEK immer über ChaCha, Einträge über den Service, den der Nutzer pro Eintrag wählt.
     val chacha = HttpCryptoServiceClient(httpClient, config.cryptoServiceUrl, config.serviceTokenVault, CryptoAlg.CHACHA)
-    val aes = HttpCryptoServiceClient(httpClient, config.cryptoAesServiceUrl, config.serviceTokenVault, CryptoAlg.AES)
+    val aes = HttpCryptoServiceClient(httpClient, config.cryptoAesServiceUrl, config.serviceTokenAes, CryptoAlg.AES)
     val vaults = VaultService(
         repository = PostgresVaultRepository(dataSource),
         keyService = HttpKeyServiceClient(httpClient, config.keyServiceUrl, config.serviceTokenVault),
