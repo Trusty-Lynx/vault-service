@@ -4,23 +4,23 @@ import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.CryptoServiceClient
 import de.trustylynx.clients.CryptoServices
 import de.trustylynx.clients.KeyServiceClient
-import de.trustylynx.common.AlreadyExists
-import de.trustylynx.common.Caller
-import de.trustylynx.common.DEVICE_ID_HEADER
-import de.trustylynx.common.IntegrityError
-import de.trustylynx.common.NO_DEVICE_ID
-import de.trustylynx.common.UpstreamException
-import de.trustylynx.common.VAULT_TOKEN_HEADER
-import de.trustylynx.common.VaultLocked
-import de.trustylynx.domain.KdfParams
-import de.trustylynx.domain.Vault
-import de.trustylynx.domain.ItemService
-import de.trustylynx.domain.VaultService
-import de.trustylynx.domain.VaultSession
-import de.trustylynx.persistence.VaultRepository
+import de.trustylynx.models.AlreadyExists
+import de.trustylynx.models.Caller
+import de.trustylynx.models.DEVICE_ID_HEADER
+import de.trustylynx.models.IntegrityError
+import de.trustylynx.models.KdfParams
+import de.trustylynx.models.NO_DEVICE_ID
+import de.trustylynx.models.UpstreamException
+import de.trustylynx.models.VAULT_TOKEN_HEADER
+import de.trustylynx.models.Vault
+import de.trustylynx.models.VaultLocked
+import de.trustylynx.models.VaultSession
+import de.trustylynx.repositories.VaultRepository
 import de.trustylynx.security.LoginTokenVerifier
 import de.trustylynx.security.VaultToken
 import de.trustylynx.security.VerifierHasher
+import de.trustylynx.services.ItemService
+import de.trustylynx.services.VaultService
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -61,8 +61,6 @@ class VaultRoutesTest {
     private val auth = FakeAuthService()
     private val clock = Clock.fixed(Instant.parse("2026-10-19T12:00:00Z"), ZoneOffset.UTC)
 
-    // ---------- POST /vault ----------
-
     @Test
     fun `POST vault legt Tresor an und liefert Tresor-Token`() = vaultTest {
         val response = postVault(VALID_BODY)
@@ -75,9 +73,9 @@ class VaultRoutesTest {
         assertContentEquals(SALT_VAULT, vault.saltVault)
         assertEquals(KdfParams.DEFAULT, vault.kdf)
         assertEquals(VerifierHasher.SALT_LENGTH, vault.saltSVault.size)
-        // vault_verifier = Argon2id(h vom Key-Service, salt_s_vault)
+        // vault_verifier = Argon2id(h from the key service, salt_s_vault)
         assertContentEquals(VerifierHasher.hash(FakeKeyService.h(UNLOCK_KEY), vault.saltSVault), vault.vaultVerifier)
-        // gespeichert wird nur, was der Crypto-Service zurückgibt
+        // only what the crypto service returns gets stored
         assertContentEquals(FakeCryptoService.c2Of(WDEK), vault.wdekC2)
 
         assertEquals("u42", keyService.calledWith?.first)
@@ -168,8 +166,6 @@ class VaultRoutesTest {
         assertNull(repository.vault)
     }
 
-    // ---------- GET /vault/params ----------
-
     @Test
     fun `params liefert Salt und KDF ohne Seiteneffekt`() = vaultTest {
         repository.vault = storedVault()
@@ -183,7 +179,7 @@ class VaultRoutesTest {
             ),
             response.json(),
         )
-        // Kein Tresor-Token, keine anderen Services
+        // no vault token, no other services
         assertTrue(repository.sessions.isEmpty())
         assertNull(keyService.calledWith)
         assertNull(cryptoService.calledWith)
@@ -215,8 +211,6 @@ class VaultRoutesTest {
         assertEquals(HttpStatusCode.Unauthorized, client.get("/vault/params").status)
     }
 
-    // ---------- POST /vault/unlock ----------
-
     @Test
     fun `unlock mit richtigem unlockKey liefert wDEK und neuen Tresor-Token`() = vaultTest {
         repository.vault = storedVault()
@@ -226,7 +220,7 @@ class VaultRoutesTest {
         assertEquals(HttpStatusCode.OK, response.status)
         val json = response.json()
         assertEquals(900, json.getValue("expiresIn").jsonPrimitive.long)
-        // wDEK = wdek_c2 ohne Schicht 2, genau so, wie der Client ihn bei POST /vault geschickt hat
+        // wDEK = wdek_c2 without layer 2, exactly as the client sent it with POST /vault
         assertEquals(b64(WDEK), json.getValue("wdek").jsonPrimitive.content)
         assertEquals(Triple("u42", CryptoPart.DEK, null), cryptoService.calledWith)
 
@@ -308,12 +302,10 @@ class VaultRoutesTest {
 
         assertEquals(HttpStatusCode.OK, postUnlock(UNLOCK_KEY).status)
 
-        // Übrig: der neue Token von u42 und der abgelaufene von u43 (fremde Nutzer fasst unlock nicht an).
+        // left: the new token of u42 and the expired one of u43 (unlock doesn't touch other users)
         assertEquals(listOf("u42", "u43"), repository.sessions.map { it.userId }.sorted())
         assertTrue(repository.sessions.single { it.userId == "u42" }.expiresAt.isAfter(clock.instant()))
     }
-
-    // ---------- Tresor-Token (#7) ----------
 
     @Test
     fun `gueltiger Tresor-Token wird akzeptiert und um 15 min verlaengert`() = runBlocking<Unit> {
@@ -351,7 +343,7 @@ class VaultRoutesTest {
         for (other in listOf(
             Caller("u43", "dev-mac-01", "s-1"),
             Caller("u42", "dev-other", "s-1"),
-            // Login-Session beendet und neu eingeloggt → neue sessionId → alter Tresor-Token ist tot.
+            // logged out and in again, new sessionId, so the old vault token is dead
             Caller("u42", "dev-mac-01", "s-2"),
         )) {
             assertFailsWith<VaultLocked>("caller=${other.userId}/${other.deviceId}/${other.sessionId}") {
@@ -359,8 +351,6 @@ class VaultRoutesTest {
             }
         }
     }
-
-    // ---------- POST /vault/lock ----------
 
     @Test
     fun `lock widerruft den Tresor-Token, danach ist er ungueltig`() = vaultTest {
@@ -415,8 +405,6 @@ class VaultRoutesTest {
         assertEquals(1, repository.sessions.size)
     }
 
-    // ---------- Login-Token (#8) ----------
-
     @Test
     fun `die alten Platzhalter-Header X-User-Id und X-Session-Id allein reichen nicht mehr`() = vaultTest {
         repository.vault = storedVault()
@@ -444,7 +432,7 @@ class VaultRoutesTest {
     fun `nach dem Logout ist auch ein noch gueltiger Tresor-Token wertlos`() = vaultTest {
         val token = VaultToken.generate()
         repository.sessions += session(token)
-        auth.sessions.remove(LOGIN_TOKEN) // Login-Session beendet
+        auth.sessions.remove(LOGIN_TOKEN) // login session ended
 
         val response = postLock(token)
 
@@ -459,8 +447,6 @@ class VaultRoutesTest {
 
         assertEquals(HttpStatusCode.BadGateway, getParams().status)
     }
-
-    // ---------- Hilfen ----------
 
     private fun service() = VaultService(repository, keyService, cryptoService, clock)
 
@@ -478,7 +464,7 @@ class VaultRoutesTest {
     }
 
     private fun vaultTest(block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
-        // Leere Config, damit nicht application.yaml geladen wird und module() mit echter DB startet.
+        // empty config, otherwise application.yaml gets loaded and module() starts with a real DB
         environment { config = MapApplicationConfig() }
         application { configureApp(VaultService(repository, keyService, cryptoService, clock), ItemService(FakeItemRepository(), CryptoServices(aes = cryptoService, chacha = cryptoService)), LoginTokenVerifier(auth)) }
         block()
@@ -507,7 +493,7 @@ class VaultRoutesTest {
 
     private suspend fun HttpResponse.json(): JsonObject = Json.parseToJsonElement(bodyAsText()).jsonObject
 
-    /** Ein Tresor, wie POST /vault ihn mit UNLOCK_KEY und WDEK angelegt hätte. */
+    // a vault like POST /vault would have created it with UNLOCK_KEY and WDEK
     private fun storedVault(): Vault {
         val saltSVault = ByteArray(16) { 4 }
         return Vault(
@@ -521,7 +507,7 @@ class VaultRoutesTest {
     }
 
     private companion object {
-        /** Derselbe Aufrufer wie in callerHeaders(). */
+        // same caller as in callerHeaders()
         val CALLER = Caller(userId = "u42", deviceId = "dev-mac-01", sessionId = "s-1")
         val SALT_VAULT = ByteArray(16) { 1 }
         val UNLOCK_KEY = ByteArray(32) { 2 }

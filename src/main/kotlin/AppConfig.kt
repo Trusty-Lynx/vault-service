@@ -1,11 +1,8 @@
 package de.trustylynx
 
-import de.trustylynx.common.CorsConfig
-import de.trustylynx.common.DbConfig
-import de.trustylynx.common.env
-import de.trustylynx.common.envOrDev
+import de.trustylynx.plugins.CorsConfig
+import de.trustylynx.repositories.DbConfig
 
-/** Alle Umgebungsvariablen des vault-service an einer Stelle. */
 class AppConfig(
     val db: DbConfig,
     val keyServiceUrl: String,
@@ -18,43 +15,55 @@ class AppConfig(
     val serviceTokenBreach: String,
     val cors: CorsConfig,
 ) {
-    // Ohne Service-Tokens, damit sie nie im Log landen.
-    override fun toString(): String =
-        "AppConfig(db=$db, keyServiceUrl=$keyServiceUrl, cryptoServiceUrl=$cryptoServiceUrl, " +
-            "cryptoAesServiceUrl=$cryptoAesServiceUrl, cors=$cors, authServiceUrl=$authServiceUrl)"
-
-
     companion object {
         fun fromEnv() = AppConfig(
             db = DbConfig(
                 url = envOrDev("DB_URL", "jdbc:postgresql://localhost:5435/vault"),
                 user = envOrDev("DB_USER", "dev"),
                 password = envOrDev("DB_PASSWORD", "dev"),
-                poolName = "vault-db",
             ),
-            // Lokal läuft der Key-Service auf 7492 (siehe key-service/docker-compose.yml).
             keyServiceUrl = envOrDev("KEY_SERVICE_URL", "http://localhost:7492"),
-            // Crypto-Service 2 (ChaCha20), Server: https://chacha50poly1305.nexvent.de. Lokal 7494 ist ein Platzhalter.
-            // Macht immer den wDEK und die Einträge mit alg = chacha.
+            // ChaCha service: does the wDEK and every item with alg = chacha
             cryptoServiceUrl = envOrDev("CRYPTO_SERVICE_URL", "http://localhost:7494"),
-            // Crypto-Service 1 (AES-256-GCM), nur für Einträge mit alg = aes. Optional, damit der Vault auch ohne ihn startet.
-            // Default ist der Container im trustylynx-net (Name geraten wie beim ChaCha-Service), lokal z. B. http://localhost:7496.
-            // Nicht erreichbar → 502 crypto_unavailable, aber nur für AES-Einträge.
+            // AES service, only for items with alg = aes. Optional so the vault still starts without it,
+            // if it's down only AES items fail with 502 crypto_unavailable
             cryptoAesServiceUrl = env("CRYPTO_AES_SERVICE_URL", "http://crypto-service-aes256gcm:8080"),
-            // Login-Token prüfen über POST /internal/sessions/verify (#8). Default ist der Container im trustylynx-net,
-            // für lokale Entwicklung AUTH_SERVICE_URL=http://localhost:7491 setzen.
             authServiceUrl = env("AUTH_SERVICE_URL", "http://auth-service:8080"),
-            // Muss im Key-Service und im ChaCha-Service als VAULT_SERVICE_TOKEN hinterlegt sein.
+            // key and ChaCha service know this one as VAULT_SERVICE_TOKEN
             serviceTokenVault = envOrDev("SERVICE_TOKEN_VAULT", "dev-service-token-vault"),
-            // Eigener Token für Crypto-Service 1 (AES). Muss gleich AES_SERVICE_TOKEN im AES-Service sein.
+            // same value as AES_SERVICE_TOKEN in the AES service
             serviceTokenAes = envOrDev("SERVICE_TOKEN_AES", "dev-service-token-aes"),
-            // Für den Auth-Service: Er kennt für /internal/sessions/verify nur den Gateway-Token, deshalb nehmen wir denselben.
-            // Muss gleich SERVICE_TOKEN_GATEWAY im Auth-Service sein. Dev-Default = Dev-Default des Auth-Service.
+            // the auth service only knows the gateway token for /internal/sessions/verify, so we use that one
             serviceTokenGateway = envOrDev("SERVICE_TOKEN_GATEWAY", "dev-service-token-gateway"),
-            // Damit ruft der Breach-Service POST /internal/vault/unlocked auf. Muss gleich SERVICE_TOKEN_BREACH im Breach-Service sein.
+            // the breach service uses this one for POST /internal/vault/unlocked
             serviceTokenBreach = envOrDev("SERVICE_TOKEN_BREACH", "dev-service-token-breach"),
-            // Optional: CORS_ALLOWED_ORIGINS (kommagetrennt), CORS_ALLOW_NULL_ORIGIN (nur lokal true). localhost geht immer.
-            cors = CorsConfig.fromEnv(),
+            cors = corsFromEnv(),
         )
     }
+}
+
+private val isDev: Boolean =
+    System.getProperty("io.ktor.development")?.toBoolean() == true
+
+// a blank value counts as not set
+private fun env(name: String, default: String): String {
+    val value = System.getenv(name)
+    return if (value.isNullOrBlank()) default else value
+}
+
+// required in prod, the default only applies in dev mode
+private fun envOrDev(name: String, devDefault: String): String {
+    val value = System.getenv(name)
+    if (!value.isNullOrBlank()) return value
+    if (isDev) return devDefault
+    error("Missing required environment variable $name")
+}
+
+private fun corsFromEnv(): CorsConfig {
+    val origins = env("CORS_ALLOWED_ORIGINS", "")
+    return CorsConfig(
+        allowedOrigins = CorsConfig.parseAllowedOrigins(origins),
+        allowNullOrigin = CorsConfig.parseFlag("CORS_ALLOW_NULL_ORIGIN", env("CORS_ALLOW_NULL_ORIGIN", "false")),
+        allowAnyOrigin = origins.isBlank(),
+    )
 }
