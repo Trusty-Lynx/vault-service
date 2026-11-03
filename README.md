@@ -7,19 +7,19 @@ Kotlin 2.4 · Ktor 3.6 · PostgreSQL 17 · Java 21
 
 ## Endpoints
 
-| Methode | Pfad | Zweck |
-|---|---|---|
-| `POST` | `/vault` | Tresor einmalig anlegen, liefert den ersten Tresor-Token |
-| `GET` | `/vault/params` | Salt und Argon2-Parameter für das Masterpasswort |
-| `POST` | `/vault/unlock` | Masterpasswort prüfen (als `unlockKey`), liefert wDEK und Tresor-Token |
-| `POST` | `/vault/lock` | Tresor-Token dieses Geräts widerrufen |
-| `GET` | `/items` | Köpfe aller Einträge (Titel, URL, Benutzer) als C1, ohne Passwörter |
-| `PUT` | `/items` | Eintrag anlegen (`rev` 1) oder ändern (`rev` + 1) |
-| `GET` | `/items/secret` | Passwort eines Eintrags als C1 |
-| `DELETE` | `/items` | Eintrag löschen |
-| `POST` | `/graphql` | Alles oben (außer `/health` und `/internal/*`) noch einmal als GraphQL, siehe unten |
-| `GET` | `/health` | `200`, wenn Service und Datenbank laufen, sonst `503` |
-| `POST` | `/internal/vault/unlocked` | Nur für den Breach-Service: `204`, wenn der Tresor entsperrt ist, sonst `401 vault_locked` |
+| Methode | Pfad | Zweck | Wer darf das aufrufen? |
+|---|---|---|---|
+| `POST` | `/vault` | Tresor einmalig anlegen, liefert den ersten Tresor-Token | Login-Token |
+| `GET` | `/vault/params` | Salt und Argon2-Parameter für das Masterpasswort | Login-Token |
+| `POST` | `/vault/unlock` | Masterpasswort prüfen (als `unlockKey`), liefert wDEK und Tresor-Token | Login-Token |
+| `POST` | `/vault/lock` | Tresor-Token dieses Geräts widerrufen | Login-Token + Tresor-Token |
+| `GET` | `/items` | Köpfe aller Einträge (Titel, URL, Benutzer) als C1, ohne Passwörter | Login-Token + Tresor-Token |
+| `PUT` | `/items` | Eintrag anlegen (`rev` 1) oder ändern (`rev` + 1) | Login-Token + Tresor-Token |
+| `GET` | `/items/secret` | Passwort eines Eintrags als C1 | Login-Token + Tresor-Token |
+| `DELETE` | `/items` | Eintrag löschen | Login-Token + Tresor-Token |
+| `POST` | `/graphql` | Alles oben noch einmal als GraphQL, siehe unten | wie die REST-Endpoints |
+| `GET` | `/health` | `200`, wenn Service und Datenbank laufen, sonst `503` | alle |
+| `POST` | `/internal/vault/unlocked` | `204`, wenn der Tresor entsperrt ist, sonst `401 vault_locked` | nur Breach-Service (`X-Service-Token`) |
 
 `/internal/vault/unlocked` braucht keinen Login-Token, sondern `X-Service-Token` (`SERVICE_TOKEN_BREACH`).
 Body: `{userId, sessionId, deviceId, vaultToken}`. userId und sessionId hat der Breach-Service vorher beim Auth-Service geprüft.
@@ -59,20 +59,27 @@ curl -X POST localhost:8080/graphql -H "Authorization: Bearer $LOGIN" -H "X-Vaul
 
 ```text
 src/main/kotlin/
-├── Application.kt   Einstieg: baut alle Teile und verdrahtet sie
-├── AppConfig.kt     alle Umgebungsvariablen an einer Stelle
-├── api/             Routen und Request-/Response-Klassen (Dtos.kt)
-├── validation/      Requests prüfen und in Domain-Objekte übersetzen
-├── domain/          Use Cases (VaultService, ItemService) und Modelle (Vault.kt, Item.kt)
-├── persistence/     Repositories (Interface + Postgres)
-├── clients/         Aufrufe an andere Services (Key-, Crypto-, Auth-Service)
-├── security/        Tresor-Verifier (Argon2id), Tresor-Token, Login-Token-Prüfung (#8)
-└── common/          gleich in allen Services: Fehler, JSON, Env, DB, HTTP-Client, Health, Request-ID, CORS
-src/main/resources/db/migration/   Datenbankschema (Flyway)
+├── Application.kt     Start: liest die Konfiguration, baut alle Teile, verbindet sie
+├── AppConfig.kt       alle Umgebungsvariablen an einer Stelle
+├── routes/            HTTP und GraphQL: Request lesen, Eingaben prüfen (Validation.kt), Service aufrufen, antworten
+├── services/          Fachlogik (VaultService, ItemService), kennt kein HTTP
+├── repositories/      SQL und Datenbank-Setup (Interface + Postgres)
+├── clients/           Aufrufe an Key-, Crypto- und Auth-Service
+├── models/            Requests/Responses (Dtos.kt), Tabellenzeilen, Fehler, Header-Namen
+├── security/          Tresor-Verifier (Argon2id), Tresor-Token, Login-Token-Prüfung, Service-Token, Base64
+└── plugins/           Ktor-Einrichtung: JSON, Fehlerantworten, CORS, Request-ID/Logging
+src/main/resources/
+├── application.yaml
+├── logback.xml
+├── graphql/           GraphQL-Schema
+└── db/migration/      Datenbankschema (Flyway)
+src/test/kotlin/       Endpoint-Tests und Fakes, clients/ und security/ wie in main
 ```
 
-Ein Request läuft immer `api` → `validation` → `domain` → `persistence`/`clients`.
-Fehler werden als Exception geworfen (`common/ApiException.kt`) und zentral in `common/StatusPages.kt` beantwortet.
+Ein Request läuft immer `routes` → `services` → `repositories` oder `clients`.
+Fehler werden als Exception geworfen (`models/ApiException.kt`) und zentral in `plugins/StatusPages.kt` beantwortet.
+`module()` baut die echten Teile (Datenbank, HTTP-Client), `configureApp(...)` installiert Plugins und Routen.
+So starten die Tests die App mit Fakes. Die Repositories und Clients sind deshalb Interfaces.
 Jede Anfrage hat eine `X-Request-Id`. Sie steht in jeder Logzeile und wird an Key- und Crypto-Service weitergereicht.
 
 Andere Services, die hier aufgerufen werden:
@@ -99,7 +106,7 @@ docker compose -f docker-compose.dev.yml up -d   # Postgres auf localhost:5435
 
 Ohne `-Pdevelopment` müssen alle Pflichtvariablen gesetzt sein. Welche das sind, steht in `.env.example`.
 Das Schema legt Flyway beim Start an. Eine DB, die `vaults` und `vault_sessions` schon ohne Flyway hatte,
-wird einmalig als Version 1 markiert, danach laufen nur neuere Migrationen (`baselineOnMigrate`, `common/Database.kt`).
+wird einmalig als Version 1 markiert, danach laufen nur neuere Migrationen (`baselineOnMigrate`, `repositories/Database.kt`).
 
 Läuft Gradle wegen eines Virenscanners mit SSL-Scanning nicht (z. B. Norton), hilft in `~/.gradle/gradle.properties`:
 `systemProp.javax.net.ssl.trustStoreType=Windows-ROOT`.
@@ -110,8 +117,10 @@ Läuft Gradle wegen eines Virenscanners mit SSL-Scanning nicht (z. B. Norton), h
 ./gradlew test
 ```
 
-Die Endpoint-Tests laufen ohne Datenbank, Key- und Crypto-Service, `src/test/kotlin/Fakes.kt` ersetzt alle drei.
-Die HTTP-Clients werden gegen eine `MockEngine` getestet.
+Die Endpoint-Tests laufen ohne Datenbank, Auth-, Key- und Crypto-Service, `src/test/kotlin/Fakes.kt` ersetzt alle.
+Die HTTP-Clients werden gegen eine `MockEngine` getestet. Übersprungen wird nichts, Docker braucht es für die Tests nicht.
+Dafür testet kein automatischer Test das SQL in `PostgresVaultRepository` und `PostgresItemRepository`, das geht nur
+von Hand gegen die Dev-Datenbank (siehe „Lokal starten“).
 
 ## Deploy
 
@@ -125,3 +134,15 @@ Die `.env` liegt nur auf dem Server.
 - **Geräte-Signatur** (`X-Timestamp`, `X-Device-Sig`) wird nicht geprüft.
 - **Vorübergehend:** `X-Device-Id` ist optional (`NO_DEVICE_ID`), und ohne `CORS_ALLOWED_ORIGINS` ist jede Origin erlaubt.
 - **Tresor beim Konto löschen:** In der Doku offen, wer das auslöst.
+- **Löschen ohne `rev`:** `DELETE /items` prüft nicht, ob sich der Eintrag inzwischen geändert hat (laut Doku offen).
+- **Guard-Ticket beim ChaCha-Service:** Er verlangt für Teil `s` noch ein Ticket. Solange das so ist, gibt `GET /items/secret`
+  bei ChaCha-Einträgen `502`.
+- **Rate-Limit ist gestrichen,** `TooManyRequests` und der `Retry-After`-Header in `StatusPages` werden nie benutzt.
+- **Logger-Name:** Der GraphQL-Fehler-Logger heißt noch `de.trustylynx.api.GraphQL` (altes Paket). Absichtlich so gelassen,
+  damit sich die Logzeilen durch den Umbau nicht ändern.
+- **Abweichungen von der einheitlichen Struktur:** `security/LoginTokenVerifier` ruft den Auth-Service (`clients/`) auf und
+  liest Header aus dem `ApplicationCall`. `routes/GraphQlSchema` nutzt `plugins/AppJson`, damit GraphQL-Eingaben genauso
+  gelesen werden wie REST-Bodys. Beides umzubauen hätte die Tests verändert.
+- **Doku veraltet:** `documentation/anforderungen/umbau-ohne-guard/vault-service.md` sagt „kein `X-Device-Id`“,
+  „`vault_sessions` ohne `device_id`“ und `/items/{itemId}` im Pfad. Der Code macht es nach den späteren Entscheidungen
+  anders (Gerät optional gebunden, `itemId` im Header seit 2026-10-21).
