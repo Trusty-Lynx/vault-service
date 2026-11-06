@@ -3,7 +3,6 @@ package de.trustylynx
 import de.trustylynx.clients.CryptoAlg
 import de.trustylynx.clients.CryptoPart
 import de.trustylynx.clients.CryptoServices
-import de.trustylynx.models.DEVICE_ID_HEADER
 import de.trustylynx.models.ITEM_ID_HEADER
 import de.trustylynx.models.StoredItem
 import de.trustylynx.models.VAULT_TOKEN_HEADER
@@ -390,7 +389,6 @@ class ItemRoutesTest {
 
     @Test
     fun `Crypto-Service lehnt ab oder ist nicht erreichbar ergibt 502`() = itemTest {
-        // also what it looks like while the ChaCha service still wants a guard ticket for part s (403 becomes 502)
         itemRepository.items["u42" to ITEM_ID] = StoredItem(ITEM_ID, 1, byteArrayOf(9), FakeCryptoService.c2Of(SECRET))
         cryptoService.fail = true
 
@@ -476,11 +474,10 @@ class ItemRoutesTest {
     }
 
     private fun session(expiresAt: Instant = clock.instant().plus(Duration.ofMinutes(10))) =
-        VaultSession(VaultToken.hash(token), "u42", "dev-mac-01", "s-1", expiresAt)
+        VaultSession(VaultToken.hash(token), "u42", "s-1", expiresAt)
 
     private fun HttpRequestBuilder.callerHeaders() {
         header(HttpHeaders.Authorization, "Bearer $LOGIN_TOKEN")
-        header(DEVICE_ID_HEADER, "dev-mac-01")
     }
 
     private suspend fun ApplicationTestBuilder.putItem(

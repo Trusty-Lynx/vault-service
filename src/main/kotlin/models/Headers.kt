@@ -1,10 +1,7 @@
 package de.trustylynx.models
 
-// These headers only say WHAT is meant (device, vault token, item), never WHO is asking.
+// These headers only say WHAT is meant (vault token, item), never WHO is asking.
 // Who is asking only comes from the login token.
-
-// optional for now, see NO_DEVICE_ID
-const val DEVICE_ID_HEADER = "X-Device-Id"
 
 const val VAULT_TOKEN_HEADER = "X-Vault-Token"
 

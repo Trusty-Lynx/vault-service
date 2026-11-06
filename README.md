@@ -22,14 +22,13 @@ Kotlin 2.4 · Ktor 3.6 · PostgreSQL 17 · Java 21
 | `POST` | `/internal/vault/unlocked` | `204`, wenn der Tresor entsperrt ist, sonst `401 vault_locked` | nur Breach-Service (`X-Service-Token`) |
 
 `/internal/vault/unlocked` braucht keinen Login-Token, sondern `X-Service-Token` (`SERVICE_TOKEN_BREACH`).
-Body: `{userId, sessionId, deviceId, vaultToken}`. userId und sessionId hat der Breach-Service vorher beim Auth-Service geprüft.
+Body: `{userId, sessionId, vaultToken}`. userId und sessionId hat der Breach-Service vorher beim Auth-Service geprüft.
 
 Jeder andere Endpoint außer `/health` braucht den Login-Token vom Auth-Service: `Authorization: Bearer <login-token>`.
 Der Vault-Service prüft ihn bei jeder Anfrage selbst über `POST /internal/sessions/verify` (#8). Wer anfragt, kommt nur von dort.
 Alles außer `/vault`, `/vault/params` und `/vault/unlock` braucht zusätzlich den Tresor-Token im Header `X-Vault-Token`.
-Die `itemId` steht im Header `X-Item-Id`, nicht im Pfad (abweichend von der Doku, Entscheid 2026-10-21).
-`X-Device-Id` ist vorerst optional.
-Felder, Fehler und Abläufe: [documentation/api/vault-service](https://github.com/Trusty-Lynx/documentation/tree/main/api/vault-service).
+Die `itemId` steht im Header `X-Item-Id`, nicht im Pfad (Entscheid 2026-10-21).
+Ein Tresor-Token hängt an Nutzer und Login-Session. Geräte gibt es seit dem Wegfall des Guard-Service nicht mehr.
 
 ### GraphQL (#36)
 
@@ -131,18 +130,8 @@ Die `.env` liegt nur auf dem Server.
 
 - **Eigener Token beim Auth-Service:** Für `/internal/sessions/verify` nutzen wir den Gateway-Token, weil der Auth-Service
   keinen anderen kennt. Sauberer wäre ein eigener Vault-Token, dafür müsste der Auth-Service zwei Tokens akzeptieren.
-- **Geräte-Signatur** (`X-Timestamp`, `X-Device-Sig`) wird nicht geprüft.
-- **Vorübergehend:** `X-Device-Id` ist optional (`NO_DEVICE_ID`), und ohne `CORS_ALLOWED_ORIGINS` ist jede Origin erlaubt.
 - **Tresor beim Konto löschen:** In der Doku offen, wer das auslöst.
 - **Löschen ohne `rev`:** `DELETE /items` prüft nicht, ob sich der Eintrag inzwischen geändert hat (laut Doku offen).
-- **Guard-Ticket beim ChaCha-Service:** Er verlangt für Teil `s` noch ein Ticket. Solange das so ist, gibt `GET /items/secret`
-  bei ChaCha-Einträgen `502`.
-- **Rate-Limit ist gestrichen,** `TooManyRequests` und der `Retry-After`-Header in `StatusPages` werden nie benutzt.
-- **Logger-Name:** Der GraphQL-Fehler-Logger heißt noch `de.trustylynx.api.GraphQL` (altes Paket). Absichtlich so gelassen,
-  damit sich die Logzeilen durch den Umbau nicht ändern.
 - **Abweichungen von der einheitlichen Struktur:** `security/LoginTokenVerifier` ruft den Auth-Service (`clients/`) auf und
   liest Header aus dem `ApplicationCall`. `routes/GraphQlSchema` nutzt `plugins/AppJson`, damit GraphQL-Eingaben genauso
   gelesen werden wie REST-Bodys. Beides umzubauen hätte die Tests verändert.
-- **Doku veraltet:** `documentation/anforderungen/umbau-ohne-guard/vault-service.md` sagt „kein `X-Device-Id`“,
-  „`vault_sessions` ohne `device_id`“ und `/items/{itemId}` im Pfad. Der Code macht es nach den späteren Entscheidungen
-  anders (Gerät optional gebunden, `itemId` im Header seit 2026-10-21).

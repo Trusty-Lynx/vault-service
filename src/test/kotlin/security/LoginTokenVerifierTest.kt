@@ -2,8 +2,6 @@ package de.trustylynx.security
 
 import de.trustylynx.clients.AuthServiceClient
 import de.trustylynx.clients.VerifiedSession
-import de.trustylynx.models.DEVICE_ID_HEADER
-import de.trustylynx.models.NO_DEVICE_ID
 import de.trustylynx.models.UpstreamException
 import de.trustylynx.plugins.configureSerialization
 import de.trustylynx.plugins.configureStatusPages
@@ -32,37 +30,29 @@ class LoginTokenVerifierTest {
 
     @Test
     fun `gueltiger Token liefert Caller aus der Antwort des Auth-Service`() = verifierTest {
-        val response = getMe { bearer(LOGIN_TOKEN); header(DEVICE_ID_HEADER, "dev-mac-01") }
-
-        assertEquals(HttpStatusCode.OK, response.status)
-        assertEquals("u42|dev-mac-01|s-1", response.bodyAsText())
-        assertEquals(LOGIN_TOKEN, auth.calledWith)
-    }
-
-    @Test
-    fun `X-User-Id und X-Session-Id aus der Anfrage werden ignoriert`() = verifierTest {
-        val response = getMe {
-            bearer(LOGIN_TOKEN)
-            header(DEVICE_ID_HEADER, "dev-mac-01")
-            // the old placeholder headers from before #8 must not have any effect
-            header("X-User-Id", "fremder-nutzer")
-            header("X-Session-Id", "fremde-session")
-        }
-
-        assertEquals("u42|dev-mac-01|s-1", response.bodyAsText())
-    }
-
-    @Test
-    fun `ohne X-Device-Id nimmt vorerst den Platzhalter`() = verifierTest {
         val response = getMe { bearer(LOGIN_TOKEN) }
 
-        assertEquals("u42|$NO_DEVICE_ID|s-1", response.bodyAsText())
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals("u42|s-1", response.bodyAsText())
         assertEquals(LOGIN_TOKEN, auth.calledWith)
+    }
+
+    @Test
+    fun `alte Header X-User-Id, X-Session-Id und X-Device-Id werden ignoriert`() = verifierTest {
+        val response = getMe {
+            bearer(LOGIN_TOKEN)
+            // the old placeholder headers from before #8 and the device header from the guard era must not have any effect
+            header("X-User-Id", "fremder-nutzer")
+            header("X-Session-Id", "fremde-session")
+            header("X-Device-Id", "kaputt|id")
+        }
+
+        assertEquals("u42|s-1", response.bodyAsText())
     }
 
     @Test
     fun `ohne Authorization ergibt 401 ohne Auth-Service`() = verifierTest {
-        assertEquals(HttpStatusCode.Unauthorized, getMe { header(DEVICE_ID_HEADER, "dev-mac-01") }.status)
+        assertEquals(HttpStatusCode.Unauthorized, getMe { }.status)
         assertNull(auth.calledWith)
     }
 
@@ -75,18 +65,10 @@ class LoginTokenVerifierTest {
     }
 
     @Test
-    fun `ungueltige X-Device-Id ergibt 401 ohne Auth-Service`() = verifierTest {
-        val response = getMe { bearer(LOGIN_TOKEN); header(DEVICE_ID_HEADER, "kaputt|id") }
-
-        assertEquals(HttpStatusCode.Unauthorized, response.status)
-        assertNull(auth.calledWith)
-    }
-
-    @Test
     fun `vom Auth-Service abgelehnter Token ergibt 401`() = verifierTest {
         auth.session = null
 
-        val response = getMe { bearer(LOGIN_TOKEN); header(DEVICE_ID_HEADER, "dev-mac-01") }
+        val response = getMe { bearer(LOGIN_TOKEN) }
 
         assertEquals(HttpStatusCode.Unauthorized, response.status)
         assertEquals(true, response.bodyAsText().contains("unauthorized"))
@@ -108,7 +90,7 @@ class LoginTokenVerifierTest {
             routing {
                 get("/me") {
                     val caller = verifier.verify(call)
-                    call.respondText("${caller.userId}|${caller.deviceId}|${caller.sessionId}")
+                    call.respondText("${caller.userId}|${caller.sessionId}")
                 }
             }
         }

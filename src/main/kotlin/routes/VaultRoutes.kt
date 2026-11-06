@@ -40,7 +40,7 @@ fun Route.vaultRoutes(vaultService: VaultService, loginTokens: LoginTokenVerifie
         call.respond(vaultService.unlock(caller, validateUnlockKey(request.unlockKey)))
     }
 
-    // only revokes the vault token of this device. 401 vault_locked means it was already locked
+    // only revokes this vault token. 401 vault_locked means it was already locked
     post("/vault/lock") {
         vaultService.lock(loginTokens.verify(call), call.vaultToken())
         call.respond(HttpStatusCode.NoContent)

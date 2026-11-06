@@ -60,7 +60,6 @@ class InternalRoutesTest {
         repository.sessions += session()
         assertEquals(HttpStatusCode.Unauthorized, postUnlocked(body(userId = "u43")).status)
         assertEquals(HttpStatusCode.Unauthorized, postUnlocked(body(sessionId = "s-2")).status)
-        assertEquals(HttpStatusCode.Unauthorized, postUnlocked(body(deviceId = "anderes-geraet")).status)
         assertEquals(HttpStatusCode.Unauthorized, postUnlocked(body(token = "kaputt")).status)
     }
 
@@ -89,14 +88,13 @@ class InternalRoutesTest {
     private fun service() = VaultService(repository, FakeKeyService(), FakeCryptoService(), clock)
 
     private fun session(expiresAt: Instant = clock.instant().plus(Duration.ofMinutes(10))) =
-        VaultSession(VaultToken.hash(vaultToken), "u42", "dev-mac-01", "s-1", expiresAt)
+        VaultSession(VaultToken.hash(vaultToken), "u42", "s-1", expiresAt)
 
     private fun body(
         userId: String = "u42",
         sessionId: String = "s-1",
-        deviceId: String = "dev-mac-01",
         token: String = vaultToken,
-    ) = """{"userId":"$userId","sessionId":"$sessionId","deviceId":"$deviceId","vaultToken":"$token"}"""
+    ) = """{"userId":"$userId","sessionId":"$sessionId","vaultToken":"$token"}"""
 
     private fun internalTest(block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
         // empty config, otherwise application.yaml gets loaded and module() starts with a real DB

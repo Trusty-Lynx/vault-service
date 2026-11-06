@@ -101,7 +101,7 @@ class PostgresVaultRepository(private val dataSource: DataSource) : VaultReposit
             connection.prepareStatement(
                 """
                 UPDATE vault_sessions SET expires_at = ?
-                WHERE token_hash = ? AND user_id = ? AND device_id = ? AND session_id = ? AND expires_at > ?
+                WHERE token_hash = ? AND user_id = ? AND session_id = ? AND expires_at > ?
                 """.trimIndent(),
             ).use { statement ->
                 statement.setTimestamp(1, Timestamp.from(newExpiresAt))
@@ -115,7 +115,7 @@ class PostgresVaultRepository(private val dataSource: DataSource) : VaultReposit
             connection.prepareStatement(
                 """
                 DELETE FROM vault_sessions
-                WHERE token_hash = ? AND user_id = ? AND device_id = ? AND session_id = ? AND expires_at > ?
+                WHERE token_hash = ? AND user_id = ? AND session_id = ? AND expires_at > ?
                 """.trimIndent(),
             ).use { statement ->
                 bindSessionMatch(statement, firstIndex = 1, tokenHash, caller, now)
@@ -133,27 +133,25 @@ class PostgresVaultRepository(private val dataSource: DataSource) : VaultReposit
         }
     }
 
-    // fills token_hash = ? AND user_id = ? AND device_id = ? AND session_id = ? AND expires_at > ?
+    // fills token_hash = ? AND user_id = ? AND session_id = ? AND expires_at > ?
     private fun bindSessionMatch(statement: PreparedStatement, firstIndex: Int, tokenHash: ByteArray, caller: Caller, now: Instant) {
         statement.setBytes(firstIndex, tokenHash)
         statement.setString(firstIndex + 1, caller.userId)
-        statement.setString(firstIndex + 2, caller.deviceId)
-        statement.setString(firstIndex + 3, caller.sessionId)
-        statement.setTimestamp(firstIndex + 4, Timestamp.from(now))
+        statement.setString(firstIndex + 2, caller.sessionId)
+        statement.setTimestamp(firstIndex + 3, Timestamp.from(now))
     }
 
     private fun insertSession(connection: Connection, session: VaultSession) {
         connection.prepareStatement(
             """
-            INSERT INTO vault_sessions (token_hash, user_id, device_id, session_id, expires_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO vault_sessions (token_hash, user_id, session_id, expires_at)
+            VALUES (?, ?, ?, ?)
             """.trimIndent(),
         ).use { statement ->
             statement.setBytes(1, session.tokenHash)
             statement.setString(2, session.userId)
-            statement.setString(3, session.deviceId)
-            statement.setString(4, session.sessionId)
-            statement.setTimestamp(5, Timestamp.from(session.expiresAt))
+            statement.setString(3, session.sessionId)
+            statement.setTimestamp(4, Timestamp.from(session.expiresAt))
             statement.executeUpdate()
         }
     }

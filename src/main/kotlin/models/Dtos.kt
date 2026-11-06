@@ -6,11 +6,10 @@ import kotlinx.serialization.Serializable
 data class VerifyUnlockedRequest(
     val userId: String,
     val sessionId: String,
-    val deviceId: String,
     val vaultToken: String,
 ) {
     // leaves out the vault token so it never ends up in a log
-    override fun toString() = "VerifyUnlockedRequest(userId=$userId, sessionId=$sessionId, deviceId=$deviceId)"
+    override fun toString() = "VerifyUnlockedRequest(userId=$userId, sessionId=$sessionId)"
 }
 
 @Serializable

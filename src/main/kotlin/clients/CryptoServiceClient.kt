@@ -84,7 +84,6 @@ class HttpCryptoServiceClient(
         return c2
     }
 
-    // TODO: the docs still want a guard ticket (ticket, sig) for part "s", not clear yet if that goes away for us
     override suspend fun decrypt(userId: String, part: CryptoPart, c2: ByteArray, itemId: String?): ByteArray {
         requireItemIdRule(part, itemId)
         val what = "crypto-service ${alg.wire} decrypt"

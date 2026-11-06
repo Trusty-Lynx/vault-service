@@ -46,12 +46,12 @@ class CorsTest {
 
     @Test
     fun `Preflight von lokaler Origin erlaubt JSON und unsere Header`() = corsTest {
-        val response = preflight("http://localhost:3000", "content-type,authorization,x-device-id,x-vault-token,x-item-id,x-request-id")
+        val response = preflight("http://localhost:3000", "content-type,authorization,x-vault-token,x-item-id,x-request-id")
 
         assertTrue(response.status.value in 200..299, "status ${response.status}")
         assertEquals("http://localhost:3000", response.allowOrigin())
         val allowed = assertNotNull(response.headers[HttpHeaders.AccessControlAllowHeaders]).lowercase()
-        for (h in listOf("content-type", "authorization", "x-device-id", "x-vault-token", "x-item-id", "x-request-id")) {
+        for (h in listOf("content-type", "authorization", "x-vault-token", "x-item-id", "x-request-id")) {
             assertTrue(h in allowed, "$h fehlt in $allowed")
         }
     }
@@ -72,12 +72,13 @@ class CorsTest {
     }
 
     @Test
-    fun `Preflight mit den alten Platzhalter-Headern der Website wird vorerst noch erlaubt`() = corsTest {
-        // what dashboard.js sends today: Authorization plus the old X-User-Id / X-Session-Id
-        val response = preflight("http://127.0.0.1:5500", "authorization,content-type,x-user-id,x-session-id,x-vault-token,x-item-id")
+    fun `Preflight mit alten Headern aus der Gateway- und Guard-Zeit wird abgelehnt`() = corsTest {
+        for (old in listOf("x-user-id", "x-session-id", "x-device-id", "x-timestamp", "x-device-sig")) {
+            val response = preflight("http://127.0.0.1:5500", "authorization,content-type,$old")
 
-        assertTrue(response.status.value in 200..299, "status ${response.status}")
-        assertEquals("http://127.0.0.1:5500", response.allowOrigin())
+            assertEquals(HttpStatusCode.Forbidden, response.status, old)
+            assertNull(response.allowOrigin(), old)
+        }
     }
 
     @Test
@@ -106,14 +107,15 @@ class CorsTest {
     }
 
     @Test
-    fun `ohne CORS_ALLOWED_ORIGINS darf vorerst jede Origin aufrufen`() = corsTest(CorsConfig(allowAnyOrigin = true)) {
-        val response = postVaultFrom("https://website.example")
+    fun `die Website darf ohne Konfiguration aufrufen`() = corsTest {
+        val response = postVaultFrom("https://trustylynx.nexvent.de")
 
         assertEquals(HttpStatusCode.Unauthorized, response.status)
-        assertEquals("*", response.allowOrigin())
+        assertEquals("https://trustylynx.nexvent.de", response.allowOrigin())
 
-        val preflight = preflight("https://website.example", "content-type,authorization,x-vault-token")
+        val preflight = preflight("https://trustylynx.nexvent.de", "content-type,authorization,x-vault-token,x-item-id")
         assertTrue(preflight.status.value in 200..299, "status ${preflight.status}")
+        assertEquals("https://trustylynx.nexvent.de", preflight.allowOrigin())
     }
 
     @Test
