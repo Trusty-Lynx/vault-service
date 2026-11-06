@@ -6,10 +6,8 @@ import de.trustylynx.clients.CryptoServices
 import de.trustylynx.clients.KeyServiceClient
 import de.trustylynx.models.AlreadyExists
 import de.trustylynx.models.Caller
-import de.trustylynx.models.DEVICE_ID_HEADER
 import de.trustylynx.models.IntegrityError
 import de.trustylynx.models.KdfParams
-import de.trustylynx.models.NO_DEVICE_ID
 import de.trustylynx.models.UpstreamException
 import de.trustylynx.models.VAULT_TOKEN_HEADER
 import de.trustylynx.models.Vault
@@ -84,7 +82,6 @@ class VaultRoutesTest {
 
         val session = repository.sessions.single()
         assertContentEquals(VaultToken.hash(token), session.tokenHash)
-        assertEquals("dev-mac-01", session.deviceId)
         assertEquals("s-1", session.sessionId)
         assertEquals(clock.instant().plus(Duration.ofMinutes(15)), session.expiresAt)
     }
@@ -127,27 +124,15 @@ class VaultRoutesTest {
     }
 
     @Test
-    fun `POST vault ohne X-Device-Id nimmt vorerst den Platzhalter`() = vaultTest {
+    fun `POST vault ignoriert eine alte X-Device-Id`() = vaultTest {
         val response = client.post("/vault") {
             header(HttpHeaders.Authorization, "Bearer $LOGIN_TOKEN")
+            header("X-Device-Id", "kaputt|id")
             contentType(ContentType.Application.Json)
             setBody(VALID_BODY)
         }
 
         assertEquals(HttpStatusCode.Created, response.status)
-        assertEquals(NO_DEVICE_ID, repository.sessions.single().deviceId)
-    }
-
-    @Test
-    fun `POST vault mit ungueltiger X-Device-Id ergibt 401`() = vaultTest {
-        val response = client.post("/vault") {
-            header(HttpHeaders.Authorization, "Bearer $LOGIN_TOKEN")
-            header(DEVICE_ID_HEADER, "kaputt|id")
-            contentType(ContentType.Application.Json)
-            setBody(VALID_BODY)
-        }
-
-        assertEquals(HttpStatusCode.Unauthorized, response.status)
     }
 
     @Test
@@ -228,7 +213,6 @@ class VaultRoutesTest {
         val session = repository.sessions.single()
         assertContentEquals(VaultToken.hash(token), session.tokenHash)
         assertEquals("u42", session.userId)
-        assertEquals("dev-mac-01", session.deviceId)
         assertEquals("s-1", session.sessionId)
         assertEquals(clock.instant().plus(Duration.ofMinutes(15)), session.expiresAt)
     }
@@ -336,17 +320,16 @@ class VaultRoutesTest {
     }
 
     @Test
-    fun `Tresor-Token gilt nur fuer denselben Nutzer, dasselbe Geraet und dieselbe Login-Session`() = runBlocking<Unit> {
+    fun `Tresor-Token gilt nur fuer denselben Nutzer und dieselbe Login-Session`() = runBlocking<Unit> {
         val token = VaultToken.generate()
         repository.sessions += session(token)
 
         for (other in listOf(
-            Caller("u43", "dev-mac-01", "s-1"),
-            Caller("u42", "dev-other", "s-1"),
+            Caller("u43", "s-1"),
             // logged out and in again, new sessionId, so the old vault token is dead
-            Caller("u42", "dev-mac-01", "s-2"),
+            Caller("u42", "s-2"),
         )) {
-            assertFailsWith<VaultLocked>("caller=${other.userId}/${other.deviceId}/${other.sessionId}") {
+            assertFailsWith<VaultLocked>("caller=${other.userId}/${other.sessionId}") {
                 service().requireUnlocked(other, token)
             }
         }
@@ -385,23 +368,23 @@ class VaultRoutesTest {
     }
 
     @Test
-    fun `lock betrifft nur den Token dieses Geraets`() = vaultTest {
+    fun `lock betrifft nur diesen Tresor-Token`() = vaultTest {
         val mine = VaultToken.generate()
-        val otherDevice = VaultToken.generate()
+        val otherTab = VaultToken.generate()
         repository.sessions += session(mine)
-        repository.sessions += session(otherDevice, deviceId = "dev-phone")
+        repository.sessions += session(otherTab)
 
         assertEquals(HttpStatusCode.NoContent, postLock(mine).status)
 
-        assertEquals("dev-phone", repository.sessions.single().deviceId)
+        assertContentEquals(VaultToken.hash(otherTab), repository.sessions.single().tokenHash)
     }
 
     @Test
-    fun `lock mit dem Token eines anderen Geraets ergibt vault_locked und loescht nichts`() = vaultTest {
-        val otherDevice = VaultToken.generate()
-        repository.sessions += session(otherDevice, deviceId = "dev-phone")
+    fun `lock mit dem Token einer anderen Login-Session ergibt vault_locked und loescht nichts`() = vaultTest {
+        val otherSession = VaultToken.generate()
+        repository.sessions += session(otherSession, sessionId = "s-2")
 
-        assertEquals(HttpStatusCode.Unauthorized, postLock(otherDevice).status)
+        assertEquals(HttpStatusCode.Unauthorized, postLock(otherSession).status)
         assertEquals(1, repository.sessions.size)
     }
 
@@ -453,10 +436,9 @@ class VaultRoutesTest {
     private fun session(
         token: String,
         userId: String = "u42",
-        deviceId: String = "dev-mac-01",
         sessionId: String = "s-1",
         expiresAt: Instant = clock.instant().plus(Duration.ofMinutes(10)),
-    ) = VaultSession(VaultToken.hash(token), userId, deviceId, sessionId, expiresAt)
+    ) = VaultSession(VaultToken.hash(token), userId, sessionId, expiresAt)
 
     private suspend fun ApplicationTestBuilder.postLock(token: String?): HttpResponse = client.post("/vault/lock") {
         callerHeaders()
@@ -488,7 +470,6 @@ class VaultRoutesTest {
 
     private fun io.ktor.client.request.HttpRequestBuilder.callerHeaders() {
         header(HttpHeaders.Authorization, "Bearer $LOGIN_TOKEN")
-        header(DEVICE_ID_HEADER, "dev-mac-01")
     }
 
     private suspend fun HttpResponse.json(): JsonObject = Json.parseToJsonElement(bodyAsText()).jsonObject
@@ -508,7 +489,7 @@ class VaultRoutesTest {
 
     private companion object {
         // same caller as in callerHeaders()
-        val CALLER = Caller(userId = "u42", deviceId = "dev-mac-01", sessionId = "s-1")
+        val CALLER = Caller(userId = "u42", sessionId = "s-1")
         val SALT_VAULT = ByteArray(16) { 1 }
         val UNLOCK_KEY = ByteArray(32) { 2 }
         val WDEK = byteArrayOf(0x01, 0x01) + ByteArray(60) { 3 }

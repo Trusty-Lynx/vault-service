@@ -84,7 +84,7 @@ class VaultService(
         )
     }
 
-    // The token has to match userId, deviceId and the login session. When the login session ends, the sessionId
+    // The token has to match userId and the login session. When the login session ends, the sessionId
     // no longer matches, so the vault token is dead too. Every failure is the same VaultLocked, we don't say why
     suspend fun requireUnlocked(caller: Caller, vaultToken: String?) {
         val tokenHash = hashIfWellFormed(vaultToken) ?: throw VaultLocked()
@@ -92,7 +92,7 @@ class VaultService(
         if (!repository.touchSession(tokenHash, caller, now, now.plus(VaultToken.IDLE_TIMEOUT))) throw VaultLocked()
     }
 
-    // other devices stay unlocked and the login stays as it is
+    // only this vault token, the login stays as it is
     suspend fun lock(caller: Caller, vaultToken: String?) {
         val tokenHash = hashIfWellFormed(vaultToken) ?: throw VaultLocked()
         if (!repository.deleteSession(tokenHash, caller, clock.instant())) throw VaultLocked()
@@ -117,7 +117,6 @@ class VaultService(
     private fun newSession(caller: Caller, token: String) = VaultSession(
         tokenHash = VaultToken.hash(token),
         userId = caller.userId,
-        deviceId = caller.deviceId,
         sessionId = caller.sessionId,
         expiresAt = clock.instant().plus(VaultToken.IDLE_TIMEOUT),
     )

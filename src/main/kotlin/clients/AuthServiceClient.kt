@@ -38,7 +38,7 @@ class HttpAuthServiceClient(
             val response = http.post(serviceUrl(baseUrl, "internal", "sessions", "verify")) {
                 header(SERVICE_TOKEN_HEADER, serviceToken)
                 contentType(ContentType.Application.Json)
-                // only {token}, the auth service rejects unknown fields like deviceId with 400
+                // only {token}, the auth service rejects unknown fields with 400
                 setBody(VerifySessionRequest(token = token))
             }
             // 401 (unknown or expired) and 400 (wrong format) aren't an outage, the token is just invalid

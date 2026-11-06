@@ -134,7 +134,7 @@ private inline fun <reified T> DataFetchingEnvironment.input(): T =
 // Like StatusPages, but errors go into `errors` instead of the HTTP status. extensions.code is the same code
 // as in REST, extensions.status the status REST would have sent
 private object GraphQlErrorHandler : DataFetcherExceptionHandler {
-    private val log = LoggerFactory.getLogger("de.trustylynx.api.GraphQL")
+    private val log = LoggerFactory.getLogger("de.trustylynx.routes.GraphQL")
 
     override fun handleException(params: DataFetcherExceptionHandlerParameters): CompletableFuture<DataFetcherExceptionHandlerResult> {
         // exceptions from future { } sometimes come wrapped

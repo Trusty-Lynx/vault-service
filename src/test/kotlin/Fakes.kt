@@ -43,14 +43,14 @@ internal class FakeVaultRepository : VaultRepository {
 
     // same condition as the SQL in PostgresVaultRepository
     private fun VaultSession.matches(tokenHash: ByteArray, caller: Caller, now: Instant) =
-        this.tokenHash.contentEquals(tokenHash) && userId == caller.userId && deviceId == caller.deviceId &&
+        this.tokenHash.contentEquals(tokenHash) && userId == caller.userId &&
             sessionId == caller.sessionId && expiresAt.isAfter(now)
 
     override suspend fun touchSession(tokenHash: ByteArray, caller: Caller, now: Instant, newExpiresAt: Instant): Boolean {
         val index = sessions.indexOfFirst { it.matches(tokenHash, caller, now) }
         if (index < 0) return false
         val old = sessions[index]
-        sessions[index] = VaultSession(old.tokenHash, old.userId, old.deviceId, old.sessionId, newExpiresAt)
+        sessions[index] = VaultSession(old.tokenHash, old.userId, old.sessionId, newExpiresAt)
         return true
     }
 

@@ -26,9 +26,6 @@ class AlreadyExists : ApiException(HttpStatusCode.Conflict, "already_exists")
 // an earlier attempt already went through
 class RevConflict(val currentRev: Int) : ApiException(HttpStatusCode.Conflict, "rev_conflict")
 
-class TooManyRequests(val retryAfterSeconds: Long) :
-    ApiException(HttpStatusCode.TooManyRequests, "too_many_requests")
-
 // wrong tag from the crypto service: someone changed data in the vault DB. That's a security incident, not an outage
 class IntegrityError : ApiException(HttpStatusCode.InternalServerError, "integrity_error")
 

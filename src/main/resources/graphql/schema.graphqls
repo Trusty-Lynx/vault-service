@@ -1,5 +1,5 @@
 # GraphQL-Schnittstelle des Vault-Service (#36). Gleiche Funktionen wie die REST-Routen, gleiche Header:
-# Authorization: Bearer <login-token> immer, X-Vault-Token für alles hinter dem Entsperren, X-Device-Id vorerst optional.
+# Authorization: Bearer <login-token> immer und X-Vault-Token für alles hinter dem Entsperren.
 # Die itemId ist hier ein Argument statt Header X-Item-Id. Feldnamen wie in api/Dtos.kt.
 # Felder auf oberster Ebene sind absichtlich nullable: Scheitert eines, ist nur es null (Fehler in errors), die anderen kommen trotzdem.
 

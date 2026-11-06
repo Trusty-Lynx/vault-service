@@ -25,11 +25,10 @@ class Vault(
     val wdekC2: ByteArray,
 )
 
-// an unlocked vault on one device. Only the hash of the token is stored
+// an unlocked vault for one login session. Only the hash of the token is stored
 class VaultSession(
     val tokenHash: ByteArray,
     val userId: String,
-    val deviceId: String,
     val sessionId: String,
     val expiresAt: Instant,
 )

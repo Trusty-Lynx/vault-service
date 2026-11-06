@@ -74,9 +74,9 @@ internal fun validateAlg(alg: String?): CryptoAlg {
 }
 
 // only the ids, a broken vault token is just "locked" (vault_locked) in VaultService and not a 400
-internal fun validateCaller(userId: String, deviceId: String, sessionId: String): Caller {
-    if (!isValidId(userId) || !isValidId(deviceId) || !isValidId(sessionId)) throw BadRequest("invalid ids")
-    return Caller(userId = userId, deviceId = deviceId, sessionId = sessionId)
+internal fun validateCaller(userId: String, sessionId: String): Caller {
+    if (!isValidId(userId) || !isValidId(sessionId)) throw BadRequest("invalid ids")
+    return Caller(userId = userId, sessionId = sessionId)
 }
 
 fun ApplicationCall.itemId(): String {

@@ -6,9 +6,7 @@ import de.trustylynx.models.ErrorResponse
 import de.trustylynx.models.IntegrityError
 import de.trustylynx.models.RevConflict
 import de.trustylynx.models.RevConflictResponse
-import de.trustylynx.models.TooManyRequests
 import de.trustylynx.models.UpstreamException
-import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
@@ -18,15 +16,11 @@ import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
-import io.ktor.server.response.header
 import io.ktor.server.response.respond
 
 fun Application.configureStatusPages() {
     install(StatusPages) {
         exception<ApiException> { call, cause ->
-            if (cause is TooManyRequests) {
-                call.response.header(HttpHeaders.RetryAfter, cause.retryAfterSeconds.toString())
-            }
             // possible tampering has to stand out in the log, there's no audit log anymore
             if (cause is IntegrityError) {
                 call.application.log.error("Integrity error on ${call.request.httpMethod.value} ${call.request.path()}")

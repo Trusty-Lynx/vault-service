@@ -2,7 +2,6 @@ package de.trustylynx
 
 import de.trustylynx.clients.CryptoAlg
 import de.trustylynx.clients.CryptoServices
-import de.trustylynx.models.DEVICE_ID_HEADER
 import de.trustylynx.models.KdfParams
 import de.trustylynx.models.StoredItem
 import de.trustylynx.models.VAULT_TOKEN_HEADER
@@ -257,7 +256,7 @@ class GraphQlRoutesTest {
 
     private fun graphQlTest(block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
         environment { config = MapApplicationConfig() }
-        vaults.sessions += VaultSession(VaultToken.hash(token), "u42", "dev-mac-01", "s-1", clock.instant().plus(Duration.ofMinutes(10)))
+        vaults.sessions += VaultSession(VaultToken.hash(token), "u42", "s-1", clock.instant().plus(Duration.ofMinutes(10)))
         application {
             configureApp(
                 VaultService(vaults, keyService, cryptoService, clock),
@@ -274,7 +273,6 @@ class GraphQlRoutesTest {
         vaultToken: String? = token,
     ): HttpResponse = client.post("/graphql") {
         header(HttpHeaders.Authorization, "Bearer $LOGIN_TOKEN")
-        header(DEVICE_ID_HEADER, "dev-mac-01")
         if (vaultToken != null) header(VAULT_TOKEN_HEADER, vaultToken)
         contentType(ContentType.Application.Json)
         setBody(body(query, variables))

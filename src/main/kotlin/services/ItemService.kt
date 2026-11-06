@@ -74,15 +74,13 @@ class ItemService(
         }
     }
 
-    // NotFound also when the item belongs to someone else.
-    // The ChaCha service still wants a guard ticket for part s and answers 403 (502 for us) until that check is gone there
+    // NotFound also when the item belongs to someone else
     suspend fun secret(caller: Caller, itemId: String): ItemSecretResponse {
         val stored = repository.findSecret(caller.userId, itemId) ?: throw NotFound()
         val secret = cryptoServices.decrypt(caller.userId, CryptoPart.SECRET, stored.secretC2, itemId)
         return ItemSecretResponse(data = secret.toBase64(), rev = stored.rev)
     }
 
-    // TODO: the docs want the expected rev here, so an item that changed in the meantime doesn't get deleted
     suspend fun delete(caller: Caller, itemId: String) {
         if (!repository.delete(caller.userId, itemId)) throw NotFound()
     }
